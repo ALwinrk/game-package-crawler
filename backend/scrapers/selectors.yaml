@@ -1,0 +1,43 @@
+# 各站点 CSS/XPath 选择器 — 站点改版时修改此文件即可，无需改代码
+# 运行时热加载（检测文件变更自动更新）
+
+apkpure:
+  search_url: "https://apkpure.com/search?q={package}"
+  detail_link_pattern: 'href="((?:https?://apkpure\.com)?/[^"]*{package}[^"]*)"'
+  version_selectors:
+    - '[class*="version"]'
+    - '[data-dt-version]'
+  version_code_selectors:
+    - '[data-dt-versioncode]'
+    - 'meta[name="versioncode"]'
+
+apkcombo:
+  search_url: "https://apkcombo.com/api/app/{package}"
+  version_selectors:
+    - '[class*="version"]'
+    - 'meta[itemprop="version"]'
+  version_code_patterns:
+    - 'variant\s*code[:\s]*(\d{3,12})'
+    - '"versionCode"\s*:\s*"?(\d{3,12})"?'
+
+apkmirror:
+  search_url: "https://www.apkmirror.com/?s={package}"
+  detail_link_pattern: 'href="(/apk/[^"]+/[^"]+/)"'
+  download_btn_pattern: 'href="(/apk/[^"]+?/download/[^"]*)"'
+  variant_pattern: 'href="([^"]*?\.apk[^"]*)"[^>]*>([^<]*?)</a>'
+  version_selectors:
+    - '[class*="version"]'
+    - 'meta[itemprop="version"]'
+
+apkvision:
+  search_url: "https://apkvision.org/search?q={package}"
+  detail_link_pattern: 'href="(/[^"]*?(?:app|download|game)[^"]*/)"'
+  version_selectors:
+    - '[class*="version"]'
+    - '.download-link'
+
+google_play:
+  # 使用 google-play-scraper 库，无需选择器
+  # 若失败则降级为 Playwright 渲染
+  fallback: playwright
+  cookie_import: true

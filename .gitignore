@@ -1,0 +1,34 @@
+# Build
+dist/
+build/
+*.spec.bak
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+
+# Dependencies
+node_modules/
+frontend/dist/
+
+# Runtime
+data/
+downloads/
+logs/
+*.db
+*.db-journal
+*.db-wal
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Temp
+test_*.xlsx
+test_*.xls
+*.part
