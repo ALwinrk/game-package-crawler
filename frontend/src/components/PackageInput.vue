@@ -38,7 +38,7 @@
           <el-col :span="4">
             <el-radio-group v-model="store.fetchMode">
               <el-radio-button value="fast">快速排查</el-radio-button>
-              <el-radio-button value="slow" disabled>慢速排查</el-radio-button>
+              <el-radio-button value="slow">慢速排查</el-radio-button>
               <el-radio-button value="all">全量排查</el-radio-button>
             </el-radio-group>
           </el-col>
@@ -49,7 +49,7 @@
             <el-button :icon="Delete" @click="clearResults" :disabled="!store.results.length">
               清空结果
             </el-button>
-            <el-tooltip content="快速排查: Google Play + APKPure + APKCombo (秒级)">
+            <el-tooltip content="快速排查: Google Play + APKPure + APKCombo (秒级) | 慢速排查: APKMirror + APKVision (30-90秒) | 全量排查: 全部站点">
               <el-icon><QuestionFilled /></el-icon>
             </el-tooltip>
           </el-col>

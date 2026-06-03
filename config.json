@@ -1,8 +1,11 @@
 {
   "download_path": "./downloads",
   "download_concurrency": 3,
+  "download_chunk_size": 1048576,
   "scraper_concurrency": 4,
   "playwright_concurrency": 2,
+  "batch_concurrency": 5,
+  "cache_ttl_seconds": 300,
   "request_interval": 1,
   "retry_times": 2,
   "retry_delay": 1,

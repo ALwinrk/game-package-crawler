@@ -15,6 +15,7 @@ class Settings(BaseSettings):
     # ── 下载 ──────────────────────────────
     download_path: str = "./downloads"
     download_concurrency: int = 3
+    download_chunk_size: int = 1024 * 1024  # 下载缓冲区(字节)，默认1MB
 
     # ── 爬虫 ──────────────────────────────
     scraper_concurrency: int = 4
@@ -22,6 +23,12 @@ class Settings(BaseSettings):
     request_interval: float = 1.0
     retry_times: int = 2
     retry_delay: float = 1.0
+
+    # ── 批量任务 ──────────────────────────
+    batch_concurrency: int = 5         # 批量任务同时处理的包名数
+
+    # ── 缓存 ──────────────────────────────
+    cache_ttl_seconds: int = 300       # 爬虫结果缓存有效期(秒)，默认5分钟
 
     # ── 代理 ──────────────────────────────
     proxy: str = "http://127.0.0.1:7897"

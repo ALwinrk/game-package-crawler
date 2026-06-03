@@ -147,8 +147,11 @@ class DownloadManager:
                 last_sample_time = time.time()
                 last_sample_bytes = task.downloaded_size
 
+                settings = get_settings()
+                chunk_size = getattr(settings, "download_chunk_size", 1024 * 1024)
+
                 async with aiofiles.open(part_path, mode) as f:
-                    async for chunk in resp.content.iter_chunked(64 * 1024):
+                    async for chunk in resp.content.iter_chunked(chunk_size):
                         await f.write(chunk)
                         task.downloaded_size += len(chunk)
 

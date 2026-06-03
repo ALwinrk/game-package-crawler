@@ -21,7 +21,13 @@
       </template>
 
       <!-- 各站点详情表格 -->
-      <el-table :data="getSourceRows(result)" stripe size="small">
+      <el-table
+        :data="getSourceRows(result)"
+        stripe
+        size="small"
+        max-height="600"
+        virtual-scroll
+      >
         <el-table-column prop="source" label="数据源" width="120" />
         <el-table-column prop="version" label="版本名" width="120">
           <template #default="{ row }">

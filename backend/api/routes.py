@@ -14,7 +14,8 @@ import openpyxl
 from backend.api.websocket import get_ws_manager
 from backend.batch.manager import BatchTask, BatchManager, get_batch_manager
 from backend.config import get_settings, reload_settings
-from backend.core.orchestrator import query_single, query_fast, query_slow
+from backend.core.orchestrator import query_single, query_fast, query_slow, query_batch
+from backend.core.cache import get_scraper_cache, get_slow_task_store
 from backend.db.database import init_db
 from backend.download.extractors import extract_download_links, pick_best_variant
 from backend.download.manager import DownloadTask as DlTask, get_download_manager
@@ -53,9 +54,74 @@ async def fetch_fast(data: dict[str, Any]):
 async def fetch_slow(data: dict[str, Any]):
     """慢速排查 — APKMirror + APKVision（浏览器渲染，30-90s）.
 
-    注意：前端慢速排查功能暂未实现，此端点仅供 API 直接调用或后续集成。
+    同步阻塞模式，推荐使用 /api/fetch/slow/async 异步提交.
     """
     return await _do_fetch(data, query_slow)
+
+
+# ── 慢速异步任务 ───────────────────────────────────────────
+
+@router.post("/fetch/slow/async")
+async def fetch_slow_async(data: dict[str, Any]):
+    """异步慢速排查 — 提交后台任务，立即返回 task_id.
+
+    结果通过 GET /api/fetch/slow/result/{task_id} 轮询，
+    或通过 WebSocket /api/ws/{task_id} 订阅完成通知。"""
+    package = data.get("package", "").strip()
+    if not package:
+        raise HTTPException(400, "package is required")
+
+    expected_version = data.get("expected_version")
+    expected_version_code = data.get("expected_version_code")
+
+    store = get_slow_task_store()
+    task_id = store.create()
+
+    async def _run_slow():
+        try:
+            result = await query_slow(package, expected_version, expected_version_code)
+            store.complete(task_id, result)
+            # WebSocket 推送完成通知
+            ws_mgr = get_ws_manager()
+            await ws_mgr.send_to_task(task_id, {
+                "type": "slow_task_completed",
+                "data": {"task_id": task_id, "status": "completed"},
+            })
+        except Exception as e:
+            store.fail(task_id, str(e))
+            ws_mgr = get_ws_manager()
+            await ws_mgr.send_to_task(task_id, {
+                "type": "slow_task_error",
+                "data": {"task_id": task_id, "status": "error", "error": str(e)},
+            })
+
+    asyncio.create_task(_run_slow())
+
+    return {
+        "task_id": task_id,
+        "status": "pending",
+        "message": "任务已提交，预计 1-2 分钟完成",
+    }
+
+
+@router.get("/fetch/slow/result/{task_id}")
+async def fetch_slow_result(task_id: str):
+    """查询慢速异步任务结果."""
+    store = get_slow_task_store()
+    task = store.get(task_id)
+    if not task:
+        raise HTTPException(404, "任务不存在或已过期")
+    if task["status"] == "pending":
+        return {"task_id": task_id, "status": "pending", "result": None}
+    if task["status"] == "error":
+        return {"task_id": task_id, "status": "error", "error": task["error"]}
+    if task["status"] == "completed" and task["result"]:
+        return {
+            "task_id": task_id,
+            "status": "completed",
+            "result": task["result"].to_dict(),
+        }
+    return {"task_id": task_id, "status": task["status"]}
 
 
 @router.post("/fetch/all")
@@ -89,13 +155,11 @@ async def _do_fetch(data: dict[str, Any], query_fn) -> dict:
 
 @router.post("/fetch/batch")
 async def fetch_batch(data: dict[str, Any]):
-    """多包名查询（异步并发，模式可配）."""
+    """多包名查询（使用内部并发控制，默认最大5并发）."""
     packages = data.get("packages", [])
     mode = data.get("mode", "fast")
     if not packages:
         raise HTTPException(400, "packages is required")
-
-    query_fn = {"fast": query_fast, "slow": query_slow, "all": query_single}.get(mode, query_fast)
 
     # 解析包名列表
     parsed = []
@@ -109,9 +173,11 @@ async def fetch_batch(data: dict[str, Any]):
                 item.get("expected_version_code"),
             ))
 
-    # 并发查询所有包名
-    tasks = [query_fn(pkg, ev, evc) for pkg, ev, evc in parsed if pkg]
-    results_list = await asyncio.gather(*tasks)
+    # 使用 orchestrator.query_batch 进行限流并发查询
+    results_list = await query_batch(
+        [(pkg, ev, evc) for pkg, ev, evc in parsed if pkg],
+        mode=mode,
+    )
 
     return {
         "results": [r.to_dict() for r in results_list],
@@ -233,6 +299,7 @@ async def batch_cancel(task_id: str):
 @router.get("/batch/{task_id}/download")
 async def batch_download_result(task_id: str):
     """下载批量排查结果 Excel."""
+    from backend.batch.manager import BatchTask as BT
     manager = get_batch_manager()
     task = manager.get_task(task_id)
     if not task:
@@ -241,6 +308,7 @@ async def batch_download_result(task_id: str):
         raise HTTPException(400, "任务未完成")
 
     output = BatchManager.export_to_excel(task)
+    BT._cleanup_temp(task)
     return StreamingResponse(
         output,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -387,6 +455,16 @@ async def config_update(data: dict[str, Any]):
     settings.update(data)
     reload_settings()
     return {"ok": True}
+
+
+# ── 缓存管理 ───────────────────────────────────────────────
+
+@router.post("/cache/clear")
+async def cache_clear():
+    """清除所有爬虫结果缓存."""
+    cache = get_scraper_cache()
+    count = await cache.clear()
+    return {"ok": True, "cleared": count}
 
 
 # ── WebSocket ──────────────────────────────────────────────

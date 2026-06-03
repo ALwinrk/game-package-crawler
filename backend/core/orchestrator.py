@@ -189,6 +189,13 @@ async def query_fast(
     expected_version_code: str | None = None,
 ) -> FetchResult:
     """快速排查 — Google Play + APKPure + APKCombo（秒级响应）."""
+    from backend.core.cache import get_scraper_cache
+
+    cache = get_scraper_cache()
+    cached = await cache.get(package, "fast")
+    if cached is not None:
+        return cached
+
     scrapers = _get_scrapers(FAST_SCRAPERS)
     if not scrapers:
         return FetchResult(
@@ -197,7 +204,9 @@ async def query_fast(
             compare_status=CompareStatus.ERROR,
         )
     results = await _fetch_scrapers(package, scrapers)
-    return _build_fetch_result(package, results, expected_version, expected_version_code)
+    result = _build_fetch_result(package, results, expected_version, expected_version_code)
+    await cache.set(package, "fast", result)
+    return result
 
 
 async def query_slow(
@@ -205,10 +214,14 @@ async def query_slow(
     expected_version: str | None = None,
     expected_version_code: str | None = None,
 ) -> FetchResult:
-    """慢速排查 — APKMirror + APKVision（浏览器渲染，需 30-90s）.
+    """慢速排查 — APKMirror + APKVision（浏览器渲染，需 30-90s）."""
+    from backend.core.cache import get_scraper_cache
 
-    NOTE: 慢速排查功能暂未在前端实现入口，仅供 API 直接调用。
-    """
+    cache = get_scraper_cache()
+    cached = await cache.get(package, "slow")
+    if cached is not None:
+        return cached
+
     scrapers = _get_scrapers(SLOW_SCRAPERS)
     if not scrapers:
         return FetchResult(
@@ -217,7 +230,9 @@ async def query_slow(
             compare_status=CompareStatus.ERROR,
         )
     results = await _fetch_scrapers(package, scrapers)
-    return _build_fetch_result(package, results, expected_version, expected_version_code)
+    result = _build_fetch_result(package, results, expected_version, expected_version_code)
+    await cache.set(package, "slow", result)
+    return result
 
 
 async def query_single(
@@ -226,6 +241,13 @@ async def query_single(
     expected_version_code: str | None = None,
 ) -> FetchResult:
     """全量排查 — 所有启用的站点（快速 + 慢速）."""
+    from backend.core.cache import get_scraper_cache
+
+    cache = get_scraper_cache()
+    cached = await cache.get(package, "all")
+    if cached is not None:
+        return cached
+
     scrapers = _get_scrapers(ALL_SCRAPERS)
     if not scrapers:
         return FetchResult(
@@ -234,7 +256,9 @@ async def query_single(
             compare_status=CompareStatus.ERROR,
         )
     results = await _fetch_scrapers(package, scrapers)
-    return _build_fetch_result(package, results, expected_version, expected_version_code)
+    result = _build_fetch_result(package, results, expected_version, expected_version_code)
+    await cache.set(package, "all", result)
+    return result
 
 
 async def query_batch(
@@ -257,7 +281,8 @@ async def query_batch(
     query_fn = {"fast": query_fast, "slow": query_slow, "all": query_single}.get(mode, query_fast)
 
     settings = get_settings()
-    semaphore = asyncio.Semaphore(settings.scraper_concurrency)
+    concurrency = getattr(settings, "batch_concurrency", 5)
+    semaphore = asyncio.Semaphore(concurrency)
     total = len(packages)
 
     async def _process_one(idx: int, pkg: str, ev: str | None, evc: str | None):

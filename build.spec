@@ -159,6 +159,7 @@ a = Analysis(
         "backend.core.version",
         "backend.core.orchestrator",
         "backend.core.browser_manager",
+        "backend.core.cache",
         "backend.scrapers",
         "backend.scrapers.base",
         "backend.scrapers.google_play",
