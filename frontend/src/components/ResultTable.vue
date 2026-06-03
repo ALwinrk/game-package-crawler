@@ -25,8 +25,7 @@
         :data="getSourceRows(result)"
         stripe
         size="small"
-        max-height="600"
-        virtual-scroll
+        max-height="400"
       >
         <el-table-column prop="source" label="数据源" width="120" />
         <el-table-column prop="version" label="版本名" width="120">
