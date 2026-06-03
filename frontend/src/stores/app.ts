@@ -180,12 +180,12 @@ export const useAppStore = defineStore('app', () => {
   }
 
   // 获取下载直链
-  async function extractLinks(source: string, detailUrl: string, pkg: string) {
+  async function extractLinks(source: string, detailUrl: string, pkg: string, version: string = '') {
     try {
       const resp = await fetch(`${apiBase.value}/api/extract-links`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ source, detail_url: detailUrl, package: pkg }),
+        body: JSON.stringify({ source, detail_url: detailUrl, package: pkg, version }),
       })
       return await resp.json()
     } catch {

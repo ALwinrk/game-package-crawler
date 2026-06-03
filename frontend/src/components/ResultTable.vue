@@ -118,7 +118,7 @@ function openUrl(url: string) {
 async function extractAndDownload(row: RowData) {
   row._extracting = true
   try {
-    const data = await store.extractLinks(row.source, row.detail_url!, row.package)
+    const data = await store.extractLinks(row.source, row.detail_url!, row.package, row.version || '')
     if (data?.best) {
       row.download_urls = [data.best.url]
       if (data.best.arch) row.abis = [data.best.arch]

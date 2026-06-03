@@ -423,11 +423,12 @@ async def extract_links(data: dict[str, Any]):
     source = data.get("source", "").strip()
     detail_url = data.get("detail_url", "").strip()
     package = data.get("package", "").strip()
+    version = data.get("version", "").strip()
 
     if not source or not detail_url:
         raise HTTPException(400, "source and detail_url are required")
 
-    variants = await extract_download_links(source, detail_url, package=package)
+    variants = await extract_download_links(source, detail_url, package=package, version=version)
     best = pick_best_variant(variants)
 
     return {

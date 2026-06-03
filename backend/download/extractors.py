@@ -276,131 +276,40 @@ async def _playwright_capture_apk_urls(
 
 # ── APKPure ──────────────────────────────────────────────
 
-async def extract_apkpure_links(detail_url: str, package: str = "") -> list[DownloadVariant]:
-    """APKPure 详情页下载链接提取.
+def _extract_slug_from_url(url: str) -> str:
+    """从详情页 URL 提取 slug.
 
-    策略:
-    1. 从 HTML 提取 data-dt-apkid，base64 解码验证包名后构造下载 URL
-    2. 浏览器点击下载按钮作为补充
+    例: https://apkpure.com/pubg-mobile-for-android-2025/com.tencent.ig
+        → pubg-mobile-for-android-2025
+        https://apkcombo.com/pubg-mobile/com.tencent.ig/
+        → pubg-mobile
     """
-    from backend.core.http_client import http_get
+    url_clean = url.rstrip("/")
+    m = re.search(r'https?://[^/]+/([^/]+)/[^/]+$', url_clean)
+    return m.group(1) if m else ""
 
-    variants: list[DownloadVariant] = []
-    seen_urls = set()
 
-    # Step 1: Fetcher 获取页面 HTML
-    status, html = await http_get(detail_url)
-    if status != 200:
-        return variants
-
-    # Step 2: 从 data-dt-apkid 构造下载链接
-    # base64 解码验证：apkid 的 base64 部分解码后包含 {package}_{versionCode}_{hash}
-    # 这样可以精确过滤掉同页面的推荐 APP
-    all_apkids = re.findall(r'data-dt-apkid\s*=\s*"([^"]+)"', html)
-    for apkid in all_apkids:
-        if not apkid.startswith("b/APK/") or apkid in seen_urls:
-            continue
-        b64_part = apkid.replace("b/APK/", "")
-        try:
-            padding = 4 - len(b64_part) % 4
-            if padding != 4:
-                b64_part += "=" * padding
-            b64_part = b64_part.replace("-", "+").replace("_", "/")
-            decoded = base64.b64decode(b64_part).decode("utf-8", errors="ignore")
-        except Exception:
-            decoded = ""
-        if package and package not in decoded:
-            continue
-
-        seen_urls.add(apkid)
-        dl_url = f"https://d.apkpure.net/{apkid}"
-        variants.append(DownloadVariant(url=dl_url, arch=detect_arch(apkid), source="APKPure"))
-        logger.info("APKPure: {}", dl_url[:80])
-
-    # Step 3: Playwright 网络拦截兜底（设计文档 5.1.6）
-    if not variants:
-        click_selectors = [
-            'a[class*="download"]',
-            'a[class*="down"]',
-            '.download-btn',
-            '.download_btn',
-            '[data-dt-apkid]',
-            'a:has-text("Download APK")',
-        ]
-        captured = await _playwright_capture_apk_urls(detail_url, click_selectors)
-        for c_url in captured:
-            if c_url not in seen_urls:
-                seen_urls.add(c_url)
-                variants.append(DownloadVariant(url=c_url, arch=detect_arch(c_url), source="APKPure"))
-
-    return variants
+async def extract_apkpure_links(detail_url: str, package: str = "", version: str = "") -> list[DownloadVariant]:
+    """APKPure 浏览器下载页 — 构造 https://apkpure.net/cn/{slug}/{package}/download"""
+    slug = _extract_slug_from_url(detail_url)
+    if not slug:
+        return []
+    dl_url = f"https://apkpure.net/cn/{slug}/{package}/download"
+    logger.info("APKPure 浏览器下载页: {}", dl_url)
+    return [DownloadVariant(url=dl_url, arch="unknown", source="APKPure")]
 
 
 # ── APKCombo ─────────────────────────────────────────────
 
-async def extract_apkcombo_links(detail_url: str, package: str = "") -> list[DownloadVariant]:
-    """APKCombo 下载链接提取.
-
-    策略:
-    1. 静态 HTML 中已有 /download/ 路径的链接（不需要 JS 渲染）
-    2. 提取后构造完整 URL 即下载页 URL
-    3. 浏览器点击作为兜底
-    """
-    from backend.core.http_client import http_get
-
-    variants: list[DownloadVariant] = []
-    seen_urls = set()
-
-    # 优先使用 /api/app/ 格式（302 → 详情页）
-    if "/api/app/" not in detail_url and package:
-        api_url = f"https://apkcombo.com/api/app/{package}"
-    else:
-        api_url = detail_url
-
-    # Step 1: 静态 HTML 提取下载链接
-    # APKCombo 详情页有 /{slug}/{pkg}/download/{variant} 格式的链接
-    status, html = await http_get(api_url)
-    if status == 200:
-        # 匹配版本下载链接: /.../download/...-apk
-        for m in re.finditer(
-            rf'href="(/(?:[a-z]+/)?{re.escape(package)}/download/[^"]+)"' if package
-            else r'href="(/[^"]+/download/(?:phone-)?[^"]+-apk[^"]*)"',
-            html, re.IGNORECASE,
-        ):
-            rel_url = m.group(1)
-            full_url = urljoin("https://apkcombo.com", rel_url)
-            if full_url in seen_urls:
-                continue
-            seen_urls.add(full_url)
-            arch = detect_arch(rel_url)
-            variants.append(DownloadVariant(url=full_url, arch=arch, source="APKCombo"))
-            logger.info("APKCombo HTML 提取: {}", full_url[:80])
-
-        # 通用 /download/ 路径匹配（兜底）
-        if not variants:
-            for m in re.finditer(r'href="(/[^"]*/download/[^"]+)"', html):
-                rel_url = m.group(1)
-                if "/" + package.replace(".", "/") in rel_url or package in rel_url:
-                    full_url = urljoin("https://apkcombo.com", rel_url)
-                    if full_url not in seen_urls:
-                        seen_urls.add(full_url)
-                        arch = detect_arch(rel_url)
-                        variants.append(DownloadVariant(url=full_url, arch=arch, source="APKCombo"))
-                        logger.info("APKCombo 通用提取: {}", full_url[:80])
-
-    # Step 2: Playwright 网络拦截兜底（设计文档 5.1.6）
-    if not variants:
-        click_selectors = [
-            'a[href*="/download/"]', 'a:has-text("Download APK")',
-            '.variant-download a',
-        ]
-        captured = await _playwright_capture_apk_urls(api_url, click_selectors)
-        for c_url in captured:
-            if c_url not in seen_urls:
-                seen_urls.add(c_url)
-                variants.append(DownloadVariant(url=c_url, arch=detect_arch(c_url), source="APKCombo"))
-
-    return variants
+async def extract_apkcombo_links(detail_url: str, package: str = "", version: str = "") -> list[DownloadVariant]:
+    """APKCombo 浏览器下载页 — 构造 https://apkcombo.com/{slug}/{package}/download/phone-{version}-apk"""
+    slug = _extract_slug_from_url(detail_url)
+    if not slug:
+        return []
+    ver = version or "latest"
+    dl_url = f"https://apkcombo.com/{slug}/{package}/download/phone-{ver}-apk"
+    logger.info("APKCombo 浏览器下载页: {}", dl_url)
+    return [DownloadVariant(url=dl_url, arch="unknown", source="APKCombo")]
 
 
 # ── APKMirror (保持原有逻辑) ──────────────────────────────
@@ -511,14 +420,14 @@ EXTRACTOR_MAP: dict[str, callable] = {
 }
 
 
-async def extract_download_links(source_name: str, detail_url: str, package: str = "") -> list[DownloadVariant]:
+async def extract_download_links(source_name: str, detail_url: str, package: str = "", version: str = "") -> list[DownloadVariant]:
     """从指定源的详情页提取所有下载变体."""
     extractor = EXTRACTOR_MAP.get(source_name)
     if not extractor:
         return []
     try:
         if source_name in ("APKPure", "APKCombo"):
-            return await extractor(detail_url, package=package)
+            return await extractor(detail_url, package=package, version=version)
         return await extractor(detail_url)
     except Exception as e:
         logger.warning("下载链接提取失败 [{}]: {}", source_name, e)
