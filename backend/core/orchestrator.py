@@ -13,9 +13,30 @@ from backend.scrapers.apkpure import ApkpureScraper
 from backend.scrapers.apkcombo import ApkcomboScraper
 from backend.scrapers.apkmirror import ApkmirrorScraper
 from backend.scrapers.apkvision import ApkvisionScraper
-from backend.core.version import best_version, best_version_code, compare_version_codes
+import re as _re
+
+from backend.core.version import best_version, best_version_code, compare_version_codes, is_plausible_version
 
 logger = get_logger()
+
+
+def _is_placeholder_whats_new(text: str) -> bool:
+    """检测 Google Play 的占位符更新内容，视为无效."""
+    if not text or not text.strip():
+        return True
+    t = text.strip().lower()
+    patterns = [
+        r"what'?s new in the latest version",
+        r"^whats new[!.]*$",
+        r"^no recent changes[!.]*$",
+        r"^暂无更新[!.]*$",
+    ]
+    for p in patterns:
+        if _re.search(p, t):
+            return True
+    if _re.match(r'^[\d\.\s\-]+$', t):
+        return True
+    return False
 
 # ── 站点分组 ───────────────────────────────────────────────
 
@@ -107,8 +128,10 @@ def _build_fetch_result(
     codes: list[str] = []
 
     for info in results.values():
-        if info.version and not info.error:
+        if info.version and not info.error and is_plausible_version(info.version):
             versions.append(info.version)
+        elif info.version and not info.error:
+            logger.debug("过滤不合理版本: {} → {}", info.source, info.version)
         if info.version_code and not info.error:
             codes.append(info.version_code)
 
@@ -167,6 +190,27 @@ def _build_fetch_result(
     else:
         compare_status = vn_status
 
+    # ── 聚合 app_name 和 whats_new (v2.6) ──
+    # app_name 优先级: Google Play > APKPure > APKCombo
+    name_priority = ["Google Play", "APKPure", "APKCombo"]
+    best_app_name = None
+    for name in name_priority:
+        info = results.get(name)
+        if info and not info.error and info.app_name:
+            best_app_name = info.app_name
+            break
+
+    # whats_new 优先级: APKPure > APKCombo > Google Play（均过滤占位符）
+    whats_new_priority = ["APKPure", "APKCombo", "Google Play"]
+    best_whats_new = None
+    for name in whats_new_priority:
+        info = results.get(name)
+        if info and not info.error and info.whats_new:
+            if _is_placeholder_whats_new(info.whats_new):
+                continue
+            best_whats_new = info.whats_new
+            break
+
     return FetchResult(
         package=package,
         expected_version=expected_version,
@@ -177,6 +221,8 @@ def _build_fetch_result(
         compare_status=compare_status,
         version_name_compare=f"{vn_status.value}:{vn_detail}" if vn_detail else None,
         version_code_compare=f"{vc_status.value}:{vc_detail}" if vc_detail else None,
+        app_name=best_app_name,
+        whats_new=best_whats_new,
     )
 
 

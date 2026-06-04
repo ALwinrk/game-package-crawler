@@ -1,11 +1,13 @@
-"""游戏包名爬虫系统 v2.0 — 桌面启动器.
+"""游戏包名爬虫系统 v2.8 — 桌面启动器 (快速启动/关闭).
 
 双击运行: 启动后端服务 → 打开浏览器 → 等待退出 → 清理.
 """
 
 from __future__ import annotations
 
+import ctypes
 import os
+import signal
 import sys
 import time
 import threading
@@ -20,21 +22,49 @@ def get_app_dir() -> Path:
     return Path(__file__).parent
 
 
+# ── 强制退出 (v2.8: 直接 os._exit, 不等待任何清理) ────
+
+def _force_exit():
+    """收到关闭信号时立即强制退出进程."""
+    try:
+        print("\n[v2.8] 收到关闭信号，强制退出...")
+    except Exception:
+        pass
+    os._exit(0)
+
+
+def _setup_exit_handler():
+    """注册控制台关闭事件 + Unix 信号."""
+    if sys.platform == "win32":
+        @ctypes.WINFUNCTYPE(ctypes.c_int, ctypes.c_uint)
+        def _handler(ctrl_type):
+            if ctrl_type == 2:  # CTRL_CLOSE_EVENT
+                _force_exit()
+                return True
+            if ctrl_type in (0, 1):  # CTRL_C_EVENT, CTRL_BREAK_EVENT
+                _force_exit()
+                return True
+            return False
+        ctypes.windll.kernel32.SetConsoleCtrlHandler(_handler, True)
+    else:
+        for sig in (signal.SIGTERM, signal.SIGINT):
+            signal.signal(sig, lambda s, f: _force_exit())
+
+
 def main():
     import uvicorn
 
-    # 切换工作目录到应用根目录
+    # 切换工作目录
     app_dir = get_app_dir()
     os.chdir(app_dir)
 
-    # 设置 Chromium 路径（PyInstaller 打包后 chrome 在指定目录）
-    if getattr(sys, 'frozen', False) and 'LOCALAPPDATA' not in os.environ.get('_CHROMIUM_CHECKED', ''):
+    # Chromium 路径 (PyInstaller EXE 模式)
+    if getattr(sys, 'frozen', False):
         chromium_dir = app_dir / "chromium"
         if chromium_dir.exists():
-            # 让 get_chromium_executable() 能找到
             os.environ['_CHROMIUM_CHECKED'] = '1'
 
-    # 确保数据目录存在
+    # 确保数据目录
     Path("./data").mkdir(parents=True, exist_ok=True)
     Path("./downloads").mkdir(parents=True, exist_ok=True)
     Path("./logs").mkdir(parents=True, exist_ok=True)
@@ -42,16 +72,18 @@ def main():
     host = "127.0.0.1"
     port = 8000
 
-    # 在独立线程中启动浏览器（等服务器就绪后）
+    # 后台打开浏览器
     def open_browser():
-        time.sleep(2)
+        time.sleep(1.5)
         webbrowser.open(f"http://{host}:{port}")
 
     threading.Thread(target=open_browser, daemon=True).start()
 
-    print(f"游戏包名爬虫系统 v2.0")
+    # v2.8: 注册强制退出处理器
+    _setup_exit_handler()
+
+    print(f"游戏包名爬虫系统 v2.8")
     print(f"启动服务: http://{host}:{port}")
-    print(f"按 Ctrl+C 退出")
     print("-" * 50)
 
     uvicorn.run(
@@ -60,6 +92,7 @@ def main():
         port=port,
         log_level="info",
         access_log=False,
+        timeout_graceful_shutdown=2,  # v2.8: 秒级优雅关闭
     )
 
 

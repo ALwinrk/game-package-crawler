@@ -162,6 +162,31 @@ def best_version_code(codes: list[str]) -> str:
         return codes[0]
 
 
+def is_plausible_version(version: str) -> bool:
+    """版本号合理性校验.
+
+    拒绝明显异常的版本号:
+      - >4 段的版本号 (如 2.723.787 可能是版本号编码)
+      - 单段超过 5 位数字 (如 2723787)
+      - 空或纯数字无点 (只有主版本号是合理的, 但至少要有格式)
+
+    合理示例: 1.2.3, 7.5.102, 1.2.183, 2025.04.01
+    不合理示例: 2.723.787 (APKPure 常见错误), 2723787
+    """
+    if not version or not version.strip():
+        return False
+    v = version.strip()
+    parts = v.split(".")
+    if len(parts) > 4:
+        return False
+    for p in parts:
+        if not p.isdigit():
+            continue
+        if len(p) > 5:
+            return False
+    return True
+
+
 def check_for_update(
     best_v: str,
     best_vc: str | None,

@@ -43,28 +43,42 @@ class GooglePlayScraper(BaseScraper):
     name = "Google Play"
 
     async def fetch(self, package: str) -> ApkInfo:
-        """通过 google-play-scraper 查询 Google Play."""
+        """Google Play 双语言查询: 中文站取标题, 英文站取更新内容.
+
+        中文 Google Play (lang=zh, country=cn) 的 recentChanges 常为空,
+        英文站 (lang=en, country=us) 几乎总有完整 changelog。
+        """
         try:
             _setup_urllib_proxy()
-
-            # 加载 Cookie（如果有）
             cookie_data = self._load_cookies()
 
-            info = await asyncio.to_thread(
-                self._gp_fetch, package, cookie_data,
+            # 并行请求中文站 + 英文站
+            info_cn, info_en = await asyncio.gather(
+                asyncio.to_thread(self._gp_fetch, package, cookie_data, "zh", "cn"),
+                asyncio.to_thread(self._gp_fetch, package, cookie_data, "en", "us"),
             )
 
-            version = info.get("version", "")
-            if version.lower() in ("varies with device", "varies", ""):
+            # 版本号优先中文站, 空则用英文站
+            version_cn = info_cn.get("version", "")
+            version_en = info_en.get("version", "")
+            version = version_cn if version_cn and version_cn.lower() not in ("varies with device", "varies") else version_en
+
+            # 提前提取 (错误路径也需要)
+            title = info_cn.get("title", "") or info_en.get("title", "") or ""
+            whats_new_early = info_en.get("recentChanges") or info_cn.get("recentChanges") or ""
+
+            if not version or version.lower() in ("varies with device", "varies", ""):
                 return ApkInfo(
                     source=self.name,
                     package=package,
                     error="Varies with device",
+                    app_name=title or None,
+                    whats_new=whats_new_early or None,
                 )
 
-            # 格式化发布日期（Unix timestamp → 可读日期）
+            # 发布日期
             release_date = None
-            updated_ts = info.get("updated")
+            updated_ts = info_cn.get("updated") or info_en.get("updated")
             if updated_ts:
                 from datetime import datetime
                 try:
@@ -72,25 +86,21 @@ class GooglePlayScraper(BaseScraper):
                 except (ValueError, OSError):
                     release_date = str(updated_ts)
 
-            # google-play-scraper 不返回 versionCode，需从详情页 HTML 提取
-            # 这里尝试通过 version 字段本身作为版本名
             return ApkInfo(
                 source=self.name,
                 package=package,
                 version=version,
                 version_name=version,
-                version_code=None,  # google-play-scraper 不提供 versionCode
+                version_code=None,
                 release_date=release_date,
-                file_size=info.get("size", ""),
-                detail_url=f"https://play.google.com/store/apps/details?id={package}",
+                file_size=info_cn.get("size", "") or info_en.get("size", ""),
+                detail_url=f"https://play.google.com/store/apps/details?id={package}&hl=zh_CN",
                 abis=[],
+                app_name=title or None,
+                whats_new=whats_new_early or None,
             )
         except ImportError:
-            return ApkInfo(
-                source=self.name,
-                package=package,
-                error="google-play-scraper 未安装",
-            )
+            return ApkInfo(source=self.name, package=package, error="google-play-scraper 未安装")
         except Exception as e:
             err_msg = f"{type(e).__name__}: {e!s}"[:100]
             if "404" in err_msg or "NotFoundError" in err_msg:
@@ -99,16 +109,10 @@ class GooglePlayScraper(BaseScraper):
                 err_msg = "Google Play unreachable (proxy needed)"
             return ApkInfo(source=self.name, package=package, error=err_msg)
 
-    def _gp_fetch(self, package: str, cookie_data: dict | None):
+    def _gp_fetch(self, package: str, cookie_data: dict | None, lang: str = "en", country: str = "us"):
         """同步执行 google-play-scraper 调用."""
         from google_play_scraper import app as gp_app
-
-        kwargs = {"lang": "en", "country": "us"}
-        if cookie_data:
-            # google-play-scraper 可能不支持自定义 cookie
-            # 作为备选参数传递
-            pass
-
+        kwargs = {"lang": lang, "country": country}
         return gp_app(package, **kwargs)
 
     def _load_cookies(self) -> dict | None:

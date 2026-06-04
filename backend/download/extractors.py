@@ -283,18 +283,27 @@ def _extract_slug_from_url(url: str) -> str:
         → pubg-mobile-for-android-2025
         https://apkcombo.com/pubg-mobile/com.tencent.ig/
         → pubg-mobile
+
+    API 格式 (如 /api/app/{pkg}) 无法提取 slug，返回空字符串。
     """
     url_clean = url.rstrip("/")
-    m = re.search(r'https?://[^/]+/([^/]+)/[^/]+$', url_clean)
-    return m.group(1) if m else ""
+    # 排除 API/非详情页路径
+    skip_segments = {"api", "search", "download"}
+    m = re.search(r'https?://[^/]+/([^/]+)/([^/]+)$', url_clean)
+    if m:
+        slug = m.group(1)
+        if slug.lower() in skip_segments:
+            return ""
+        return slug
+    return ""
 
 
 async def extract_apkpure_links(detail_url: str, package: str = "", version: str = "") -> list[DownloadVariant]:
-    """APKPure 浏览器下载页 — 构造 https://apkpure.net/cn/{slug}/{package}/download"""
+    """APKPure 浏览器下载页 — 构造 https://apkpure.com/cn/{slug}/{package}/download"""
     slug = _extract_slug_from_url(detail_url)
     if not slug:
         return []
-    dl_url = f"https://apkpure.net/cn/{slug}/{package}/download"
+    dl_url = f"https://apkpure.com/cn/{slug}/{package}/download"
     logger.info("APKPure 浏览器下载页: {}", dl_url)
     return [DownloadVariant(url=dl_url, arch="unknown", source="APKPure")]
 
@@ -302,13 +311,18 @@ async def extract_apkpure_links(detail_url: str, package: str = "", version: str
 # ── APKCombo ─────────────────────────────────────────────
 
 async def extract_apkcombo_links(detail_url: str, package: str = "", version: str = "") -> list[DownloadVariant]:
-    """APKCombo 浏览器下载页 — 构造 https://apkcombo.com/{slug}/{package}/download/phone-{version}-apk"""
+    """APKCombo 浏览器下载页 — 构造 https://apkcombo.com/zh/{slug}/{package}/download/phone-{version}-apk
+
+    若 slug 无法从 detail_url 提取（如 API 格式 /api/app/{pkg}），
+    回退使用包名直连: https://apkcombo.com/zh/{package}/download
+    """
     slug = _extract_slug_from_url(detail_url)
-    if not slug:
-        return []
     ver = version or "latest"
-    dl_url = f"https://apkcombo.com/{slug}/{package}/download/phone-{ver}-apk"
-    logger.info("APKCombo 浏览器下载页: {}", dl_url)
+    if slug:
+        dl_url = f"https://apkcombo.com/zh/{slug}/{package}/download/phone-{ver}-apk"
+    else:
+        dl_url = f"https://apkcombo.com/zh/{package}/download"
+    logger.info("APKCombo 浏览器下载页: slug={} → {}", slug or "(无)", dl_url)
     return [DownloadVariant(url=dl_url, arch="unknown", source="APKCombo")]
 
 

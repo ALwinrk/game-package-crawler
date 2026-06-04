@@ -299,7 +299,6 @@ async def batch_cancel(task_id: str):
 @router.get("/batch/{task_id}/download")
 async def batch_download_result(task_id: str):
     """下载批量排查结果 Excel."""
-    from backend.batch.manager import BatchTask as BT
     manager = get_batch_manager()
     task = manager.get_task(task_id)
     if not task:
@@ -308,7 +307,7 @@ async def batch_download_result(task_id: str):
         raise HTTPException(400, "任务未完成")
 
     output = BatchManager.export_to_excel(task)
-    BT._cleanup_temp(task)
+    BatchManager._cleanup_temp(task)
     return StreamingResponse(
         output,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",

@@ -246,7 +246,7 @@ class BatchManager:
             task = self._active_tasks[task_id]
             task.status = "cancelled"
             task.stop_event.set()
-            BatchTask._cleanup_temp(task)
+            BatchManager._cleanup_temp(task)
             return True
         return False
 
@@ -312,7 +312,7 @@ class BatchManager:
             for r in task.results:
                 result_map[r.package] = r
         elif task._temp_result_path:
-            loaded = BatchTask._load_results_from_temp(task)
+            loaded = BatchManager._load_results_from_temp(task)
             for d in loaded:
                 # 从 dict 重建简单的包装对象
                 pkg = d.get("package", "")

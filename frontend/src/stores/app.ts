@@ -13,6 +13,8 @@ export interface SourceResult {
   detail_url: string | null
   download_urls: string[]
   error: string | null
+  app_name: string | null
+  whats_new: string | null
 }
 
 export interface FetchResult {
@@ -24,7 +26,11 @@ export interface FetchResult {
   best_version: string | null
   best_version_code: string | null
   compare_status: 'matched' | 'newer' | 'older' | 'not_found' | 'error'
+  version_name_compare: string | null
+  version_code_compare: string | null
   error: string | null
+  app_name: string | null
+  whats_new: string | null
 }
 
 export interface DownloadTask {
@@ -43,6 +49,29 @@ export interface DownloadTask {
 }
 
 export const useAppStore = defineStore('app', () => {
+  // ── 主题 (v2.5) ──
+  const darkMode = ref(false)
+
+  function initDarkMode() {
+    const saved = localStorage.getItem('darkMode')
+    if (saved !== null) {
+      darkMode.value = saved === 'true'
+    } else {
+      darkMode.value = window.matchMedia?.('(prefers-color-scheme: dark)').matches ?? false
+    }
+    applyDarkMode()
+  }
+
+  function toggleDark() {
+    darkMode.value = !darkMode.value
+    localStorage.setItem('darkMode', String(darkMode.value))
+    applyDarkMode()
+  }
+
+  function applyDarkMode() {
+    document.documentElement.classList.toggle('dark', darkMode.value)
+  }
+
   // ── 状态 ──
   const activeTab = ref('search')
   const loading = ref(false)
@@ -106,6 +135,8 @@ export const useAppStore = defineStore('app', () => {
         best_version_code: null,
         compare_status: 'error',
         error: e.message,
+        version_name_compare: null,
+        version_code_compare: null,
       }]
     } finally {
       loading.value = false
@@ -194,6 +225,9 @@ export const useAppStore = defineStore('app', () => {
   }
 
   return {
+    // 主题 (v2.5)
+    darkMode, initDarkMode, toggleDark,
+    // 业务
     activeTab, loading, packageInput, expectedVersion, expectedVersionCode,
     fetchMode, results, batchTaskId, batchProgress, batchTotal,
     downloadTasks, apiBase,

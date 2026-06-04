@@ -119,6 +119,7 @@ def _http_get_sync(url: str) -> tuple[int, str]:
             impersonate="chrome124",
             stealthy_headers=True,
             proxies=proxies,
+            headers={"Accept-Language": "zh-CN,zh;q=0.9"},
         )
         if resp.status == 200 and len(resp.html_content) > 500:
             return resp.status, resp.html_content
@@ -167,7 +168,7 @@ def _stealth_get_sync(url: str) -> tuple[int, str]:
                 proxy=proxy_config,
                 executable_path=chrome_exe,
             ) as s:
-                resp = s.fetch(url)
+                resp = s.fetch(url, headers={"Accept-Language": "zh-CN,zh;q=0.9"})
                 if resp.status == 200 and len(resp.html_content) > 500:
                     if is_cloudflare_block(resp.html_content):
                         result_queue.put((0, f"CF bypass failed: {urlparse(url).hostname}"))
@@ -229,7 +230,7 @@ def _js_render_get_sync(url: str) -> tuple[int, str]:
                 proxy=proxy_config,
                 executable_path=chrome_exe,
             ) as s:
-                resp = s.fetch(url)
+                resp = s.fetch(url, headers={"Accept-Language": "zh-CN,zh;q=0.9"})
                 if resp.status == 200 and len(resp.html_content) > 500:
                     result_queue.put((resp.status, resp.html_content))
                 else:

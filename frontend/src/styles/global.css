@@ -1,0 +1,350 @@
+/* ═══════════════════════════════════════════════════════════
+   游戏包名爬虫系统 v2.5 — 全局样式 & 主题系统
+   风格: 科技赛博 + 幽默松弛 | 参考 leleo.top 设计语言
+   ═══════════════════════════════════════════════════════════ */
+
+/* ── CSS 变量 (浅色主题 默认) ──────────────────────────── */
+:root {
+  /* 主色调 — 深蓝/靛蓝 */
+  --color-primary: #4f46e5;
+  --color-primary-light: #6366f1;
+  --color-primary-dark: #3730a3;
+  --color-accent: #10b981;
+  --color-accent-light: #34d399;
+
+  /* 背景 */
+  --bg-page: linear-gradient(135deg, #f0f4ff 0%, #e8ecf8 50%, #f5f3ff 100%);
+  --bg-card: rgba(255, 255, 255, 0.85);
+  --bg-card-hover: rgba(255, 255, 255, 0.95);
+  --bg-header: rgba(255, 255, 255, 0.6);
+  --bg-input: rgba(255, 255, 255, 0.9);
+
+  /* 文字 */
+  --text-primary: #1e293b;
+  --text-secondary: #64748b;
+  --text-muted: #94a3b8;
+
+  /* 边框 & 阴影 */
+  --border-card: 1px solid rgba(148, 163, 184, 0.2);
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.06);
+  --shadow-md: 0 4px 20px rgba(0, 0, 0, 0.08);
+  --shadow-glow: 0 0 20px rgba(79, 70, 229, 0.15);
+  --shadow-glow-green: 0 0 20px rgba(16, 185, 129, 0.15);
+
+  /* 圆角 */
+  --radius-sm: 8px;
+  --radius-md: 14px;
+  --radius-lg: 20px;
+  --radius-xl: 24px;
+
+  /* 过渡 */
+  --transition-fast: 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+  --transition-base: 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  --transition-slow: 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* ── 深色主题 ─────────────────────────────────────────── */
+html.dark {
+  --bg-page: linear-gradient(135deg, #0f172a 0%, #1e1b4b 40%, #0f2924 100%);
+  --bg-card: rgba(30, 41, 59, 0.8);
+  --bg-card-hover: rgba(30, 41, 59, 0.95);
+  --bg-header: rgba(15, 23, 42, 0.7);
+  --bg-input: rgba(30, 41, 59, 0.85);
+
+  --text-primary: #e2e8f0;
+  --text-secondary: #94a3b8;
+  --text-muted: #64748b;
+
+  --border-card: 1px solid rgba(148, 163, 184, 0.12);
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 4px 20px rgba(0, 0, 0, 0.4);
+  --shadow-glow: 0 0 24px rgba(99, 102, 241, 0.2);
+  --shadow-glow-green: 0 0 24px rgba(52, 211, 153, 0.2);
+}
+
+/* ── 全局重置 & 基础 ──────────────────────────────────── */
+*, *::before, *::after {
+  margin: 0; padding: 0; box-sizing: border-box;
+}
+
+body {
+  font-family: 'Inter', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  background: var(--bg-page);
+  color: var(--text-primary);
+  min-height: 100vh;
+  transition: background var(--transition-slow), color var(--transition-slow);
+  background-attachment: fixed;
+}
+
+/* 滚动条美化 */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: var(--color-primary-light);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover { background: var(--color-primary); }
+
+/* ── 毛玻璃效果 ──────────────────────────────────────── */
+.glass {
+  background: var(--bg-card);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: var(--border-card);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-md);
+}
+
+.glass-header {
+  background: var(--bg-header);
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  border-bottom: 1px solid rgba(148, 163, 184, 0.1);
+}
+
+/* ── 卡片样式 ────────────────────────────────────────── */
+.cyber-card {
+  background: var(--bg-card);
+  border: var(--border-card);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+  transition: all var(--transition-base);
+  overflow: hidden;
+}
+.cyber-card:hover {
+  box-shadow: var(--shadow-glow);
+  transform: translateY(-2px);
+  border-color: var(--color-primary-light);
+}
+
+/* ── 渐变按钮 ────────────────────────────────────────── */
+.btn-gradient {
+  background: linear-gradient(135deg, var(--color-primary), #7c3aed);
+  color: #fff;
+  border: none;
+  border-radius: var(--radius-md);
+  padding: 10px 24px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all var(--transition-base);
+  box-shadow: 0 4px 14px rgba(79, 70, 229, 0.3);
+}
+.btn-gradient:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 24px rgba(79, 70, 229, 0.45);
+  filter: brightness(1.1);
+}
+.btn-gradient:active { transform: translateY(0); }
+.btn-gradient--green {
+  background: linear-gradient(135deg, var(--color-accent), #059669);
+  box-shadow: 0 4px 14px rgba(16, 185, 129, 0.3);
+}
+
+/* ── 发光输入框 ──────────────────────────────────────── */
+.glow-input {
+  border-radius: var(--radius-md) !important;
+  transition: all var(--transition-base) !important;
+}
+.glow-input:focus,
+.glow-input.is-focus {
+  box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.2) !important;
+  border-color: var(--color-primary-light) !important;
+}
+
+/* ── 动画 ────────────────────────────────────────────── */
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateY(16px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes fadeInScale {
+  from { opacity: 0; transform: scale(0.95); }
+  to   { opacity: 1; transform: scale(1); }
+}
+@keyframes glowPulse {
+  0%, 100% { box-shadow: 0 0 8px rgba(79, 70, 229, 0.2); }
+  50%      { box-shadow: 0 0 20px rgba(79, 70, 229, 0.4); }
+}
+@keyframes slideDown {
+  from { opacity: 0; transform: translateY(-20px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes shimmer {
+  0%   { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+.animate-fade-in-up {
+  animation: fadeInUp 0.4s cubic-bezier(0.4, 0, 0.2, 1) both;
+}
+.animate-fade-in-scale {
+  animation: fadeInScale 0.3s cubic-bezier(0.4, 0, 0.2, 1) both;
+}
+.animate-slide-down {
+  animation: slideDown 0.35s cubic-bezier(0.4, 0, 0.2, 1) both;
+}
+
+/* 交错动画 — 子元素依次出现 */
+.stagger > * { opacity: 0; animation: fadeInUp 0.4s ease both; }
+.stagger > *:nth-child(1) { animation-delay: 0.05s; }
+.stagger > *:nth-child(2) { animation-delay: 0.1s; }
+.stagger > *:nth-child(3) { animation-delay: 0.15s; }
+.stagger > *:nth-child(4) { animation-delay: 0.2s; }
+.stagger > *:nth-child(5) { animation-delay: 0.25s; }
+
+/* 骨架屏 */
+.skeleton {
+  background: linear-gradient(90deg,
+    var(--bg-card) 25%,
+    rgba(148, 163, 184, 0.15) 50%,
+    var(--bg-card) 75%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.5s ease-in-out infinite;
+  border-radius: var(--radius-md);
+}
+
+/* ── Element Plus 主题覆盖 ───────────────────────────── */
+
+/* 标签页 */
+.el-tabs--border-card {
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+}
+.el-tabs--border-card > .el-tabs__header {
+  background: var(--bg-card) !important;
+  backdrop-filter: blur(12px);
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0 !important;
+  border: var(--border-card) !important;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.15) !important;
+}
+.el-tabs--border-card > .el-tabs__header .el-tabs__item {
+  font-weight: 500;
+  transition: all var(--transition-base);
+}
+.el-tabs--border-card > .el-tabs__header .el-tabs__item.is-active {
+  color: var(--color-primary) !important;
+  font-weight: 600;
+}
+
+/* 表格 */
+.el-table {
+  --el-table-bg-color: transparent !important;
+  --el-table-tr-bg-color: transparent !important;
+  --el-table-header-bg-color: rgba(79, 70, 229, 0.06) !important;
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+.el-table th.el-table__cell {
+  background: rgba(79, 70, 229, 0.06) !important;
+  color: var(--text-primary) !important;
+  font-weight: 600;
+  border-bottom: 2px solid rgba(79, 70, 229, 0.15) !important;
+}
+.el-table tr {
+  transition: all var(--transition-base);
+}
+.el-table tbody tr:hover > td.el-table__cell {
+  background: rgba(79, 70, 229, 0.04) !important;
+  transform: scale(1.005);
+}
+
+/* 按钮 */
+.el-button--primary {
+  background: linear-gradient(135deg, var(--color-primary), #7c3aed) !important;
+  border: none !important;
+  box-shadow: 0 4px 14px rgba(79, 70, 229, 0.3) !important;
+  transition: all var(--transition-base) !important;
+}
+.el-button--primary:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 24px rgba(79, 70, 229, 0.45) !important;
+  filter: brightness(1.1);
+}
+
+.el-button--success {
+  background: linear-gradient(135deg, var(--color-accent), #059669) !important;
+  border: none !important;
+  box-shadow: 0 4px 14px rgba(16, 185, 129, 0.3) !important;
+}
+
+/* 输入框 */
+.el-input__wrapper {
+  border-radius: var(--radius-md) !important;
+  transition: all var(--transition-base) !important;
+  box-shadow: none !important;
+}
+.el-textarea__inner {
+  border-radius: var(--radius-md) !important;
+  transition: all var(--transition-base) !important;
+}
+.el-input.is-focus .el-input__wrapper,
+.el-textarea.is-focus .el-textarea__inner {
+  box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.2) !important;
+  border-color: var(--color-primary-light) !important;
+}
+
+/* 进度条 */
+.el-progress-bar__outer {
+  border-radius: 10px !important;
+  background: rgba(148, 163, 184, 0.2) !important;
+}
+.el-progress-bar__inner {
+  border-radius: 10px !important;
+  background: linear-gradient(90deg, var(--color-primary), var(--color-accent)) !important;
+}
+
+/* 卡片 */
+.el-card {
+  background: var(--bg-card) !important;
+  backdrop-filter: blur(12px);
+  border: var(--border-card) !important;
+  border-radius: var(--radius-lg) !important;
+  box-shadow: var(--shadow-sm) !important;
+  transition: all var(--transition-base);
+}
+.el-card:hover {
+  box-shadow: var(--shadow-glow) !important;
+}
+
+/* 消息弹窗 */
+.el-message-box {
+  border-radius: var(--radius-lg) !important;
+  backdrop-filter: blur(12px);
+}
+.el-message {
+  border-radius: var(--radius-md) !important;
+  backdrop-filter: blur(10px);
+}
+
+/* Radio button */
+.el-radio-button__inner {
+  border-radius: var(--radius-sm) !important;
+  transition: all var(--transition-base) !important;
+}
+
+/* Tag */
+.el-tag {
+  border-radius: var(--radius-sm) !important;
+  font-weight: 500;
+}
+
+/* Upload */
+.el-upload-dragger {
+  border-radius: var(--radius-lg) !important;
+  border: 2px dashed rgba(79, 70, 229, 0.3) !important;
+  transition: all var(--transition-base) !important;
+}
+.el-upload-dragger:hover {
+  border-color: var(--color-primary-light) !important;
+  box-shadow: var(--shadow-glow) !important;
+}
+
+/* ── 响应式 ──────────────────────────────────────────── */
+@media (max-width: 768px) {
+  :root {
+    --radius-lg: 16px;
+    --radius-xl: 20px;
+  }
+  .glass-header { backdrop-filter: blur(12px); }
+}

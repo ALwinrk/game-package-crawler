@@ -29,6 +29,8 @@ class ApkInfo:
     detail_url: str | None = None            # 详情页 URL
     download_urls: list[str] = field(default_factory=list)  # 直链列表
     error: str | None = None                 # 错误信息
+    app_name: str | None = None              # 游戏中文名 (v2.5)
+    whats_new: str | None = None             # 更新内容 (v2.5)
 
     @property
     def ok(self) -> bool:
@@ -47,6 +49,8 @@ class ApkInfo:
             "detail_url": self.detail_url,
             "download_urls": self.download_urls,
             "error": self.error,
+            "app_name": self.app_name,
+            "whats_new": self.whats_new,
         }
 
 
@@ -64,6 +68,8 @@ class FetchResult:
     version_name_compare: str | None = None    # 版本名对比详情
     version_code_compare: str | None = None    # 版本号对比详情
     error: str | None = None
+    app_name: str | None = None                # 游戏中文名 (v2.5)
+    whats_new: str | None = None               # 更新内容 (v2.5)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -78,6 +84,8 @@ class FetchResult:
             "version_name_compare": self.version_name_compare,
             "version_code_compare": self.version_code_compare,
             "error": self.error,
+            "app_name": self.app_name,
+            "whats_new": self.whats_new,
         }
 
 
