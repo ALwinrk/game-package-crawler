@@ -101,11 +101,11 @@ def _extract_slug_from_url(url: str) -> str:
 
 
 async def extract_apkpure_links(detail_url: str, package: str = "", version: str = "") -> list[DownloadVariant]:
-    """APKPure 浏览器下载页 — 构造 https://apkpure.com/cn/{slug}/{package}/download"""
+    """APKPure 浏览器下载页 — 构造 https://apkpure.net/cn/{slug}/{package}/download"""
     slug = _extract_slug_from_url(detail_url)
     if not slug:
         return []
-    dl_url = f"https://apkpure.com/cn/{slug}/{package}/download"
+    dl_url = f"https://apkpure.net/cn/{slug}/{package}/download"
     logger.info("APKPure 浏览器下载页: {}", dl_url)
     return [DownloadVariant(url=dl_url, arch="unknown", source="APKPure")]
 
@@ -198,8 +198,8 @@ def get_download_page_url(source: str, detail_url: str, package: str = "", versi
     ver = version or "latest"
     if source == "APKPure":
         if slug:
-            return f"https://apkpure.com/cn/{slug}/{package}/download"
-        return f"https://apkpure.com/cn/{package}"
+            return f"https://apkpure.net/cn/{slug}/{package}/download"
+        return f"https://apkpure.net/cn/{package}"
     elif source == "APKCombo":
         if slug:
             return f"https://apkcombo.com/zh/{slug}/{package}/download/phone-{ver}-apk"

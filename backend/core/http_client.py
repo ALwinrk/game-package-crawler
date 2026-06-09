@@ -269,9 +269,31 @@ async def http_get(url: str) -> tuple[int, str]:
 
 # ── StealthySession 后端 ────────────────────────────────────
 
+# CF 求解器最大递归次数 (v3.5: 防止 interactive Turnstile 无限循环)
+_MAX_CF_SOLVE_ATTEMPTS = 2
+
+
 def _stealth_get_sync(url: str) -> tuple[int, str]:
-    """同步浏览器 GET — StealthySession (Chromium + CF 绕过)."""
+    """同步浏览器 GET — StealthySession (Chromium + CF 绕过).
+
+    v3.5: 使用 _StealthySessionWithLimit 子类限制 CF 求解递归次数,
+    防止 APKPure interactive Turnstile 无限循环导致线程卡死 75s.
+    """
     from scrapling.fetchers import StealthySession
+
+    # v3.5: StealthySession 子类 — CF 求解递归限制
+    class _StealthySessionWithLimit(StealthySession):
+        _cf_attempts: int = 0
+
+        def _cloudflare_solver(self, page) -> None:
+            self._cf_attempts += 1
+            if self._cf_attempts > _MAX_CF_SOLVE_ATTEMPTS:
+                logger.warning(
+                    "CF solve aborted after {} attempts for {} (interactive challenge unsolvable)",
+                    _MAX_CF_SOLVE_ATTEMPTS, urlparse(url).hostname,
+                )
+                return None
+            return super()._cloudflare_solver(page)
 
     settings = get_settings()
     proxies = _get_proxy_dict()
@@ -288,7 +310,7 @@ def _stealth_get_sync(url: str) -> tuple[int, str]:
 
     def _worker():
         try:
-            with StealthySession(
+            with _StealthySessionWithLimit(
                 headless=True,
                 solve_cloudflare=True,
                 block_ads=True,

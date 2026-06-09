@@ -20,13 +20,15 @@
   "log_level": "INFO",
   "log_retention_days": 30,
   "request_timeout": 10.0,
-  "stealth_timeout": 45.0,
-  "update_check_interval": 1800,
+  "stealth_timeout": 30.0,
+  "update_check_interval": 3600,
   "daily_updates_pages": 3,
   "daily_updates_limit": 100,
   "frontend_poll_interval": 300,
-  "panel_max_items": 150,
-  "apkpure_display_limit": 90,
-  "apkcombo_display_limit": 90,
-  "apkvision_display_limit": 60
+  "panel_max_items": 200,
+  "apkpure_display_limit": 60,
+  "apkcombo_display_limit": 40,
+  "apkcombo_trending_display_limit": 60,
+  "apkvision_display_limit": 30,
+  "apkvision_new_display_limit": 30
 }

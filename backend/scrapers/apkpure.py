@@ -28,16 +28,16 @@ class ApkpureScraper(BaseScraper):
         v3.3: 请求前随机延迟 0.5-2.0s, 降低单包名排查时的频率特征.
         """
         await _asyncio.sleep(_random.uniform(0.5, 2.0))
-        search_url = f"https://apkpure.com/search?q={package}"
+        search_url = f"https://apkpure.net/search?q={package}"
 
         # Step 1: Fetcher 获取搜索页
         status, html = await http_get(search_url)
         fetcher_ok = status == 200 and not is_cloudflare_block(html)
 
         if not fetcher_ok:
-            # 回退到 apkpure.net
+            # 回退到 apkpure.com
             return await self._fetch_from_url(
-                f"https://apkpure.net/search?q={package}", package,
+                f"https://apkpure.com/search?q={package}", package,
             )
 
         # Step 2: 从搜索页提取详情 URL
@@ -53,24 +53,27 @@ class ApkpureScraper(BaseScraper):
         if detail_url:
             return await self._fetch_from_url(detail_url, package)
 
-        # Step 5: 兜底 — .net 搜索页 (v2.8.1: 追加详情页直连)
+        # Step 5: 兜底 — .com 搜索页 (v3.5: 主域名已切 .net)
         result = await self._fetch_from_url(
-            f"https://apkpure.net/search?q={package}", package,
+            f"https://apkpure.com/search?q={package}", package,
         )
         if not result.ok:
-            # 最后尝试详情页直连 (apkpure.com/cn/{package})
+            # 最后尝试详情页直连 (apkpure.net/cn/{package})
             result = await self._fetch_from_url(
-                f"https://apkpure.com/cn/{package}", package,
+                f"https://apkpure.net/cn/{package}", package,
             )
         return result
 
     def _to_cn_url(self, url: str) -> str:
-        """将 APKPure URL 转为中文站: apkpure.com/slug → apkpure.com/cn/slug."""
-        if "apkpure.com/cn/" in url or "apkpure.net/cn/" in url:
+        """将 APKPure URL 转为中文站: apkpure.net/slug → apkpure.net/cn/slug.
+
+        v3.5: 主域名切换为 .net (apkpure.com 被 CF interactive Turnstile 拦截).
+        """
+        if "apkpure.net/cn/" in url or "apkpure.com/cn/" in url:
             return url
-        if "apkpure.net/" in url:
-            return url.replace("apkpure.net/", "apkpure.com/cn/")
-        return url.replace("apkpure.com/", "apkpure.com/cn/", 1)
+        if "apkpure.com/" in url:
+            return url.replace("apkpure.com/", "apkpure.net/cn/")
+        return url.replace("apkpure.net/", "apkpure.net/cn/", 1)
 
     async def _fetch_from_url(self, url: str, package: str) -> ApkInfo:
         """从指定 URL 提取版本信息."""
@@ -191,7 +194,7 @@ class ApkpureScraper(BaseScraper):
         pattern = r'href="((?:https?://apkpure\.(?:com|net))?/[^"]*?' + escaped + r'[^"]*)"'
         candidates = []
         for m in _re.finditer(pattern, html):
-            url = urljoin("https://apkpure.com", m.group(1))
+            url = urljoin("https://apkpure.net", m.group(1))
             if "/search" in url:
                 continue
             if f"/{pkg}" in url or f"/{pkg}?" in url or url.endswith(f"/{pkg}"):
@@ -201,7 +204,7 @@ class ApkpureScraper(BaseScraper):
         if not candidates:
             pattern2 = r"href='((?:https?://apkpure\.(?:com|net))?/[^']*?" + escaped + r"[^']*)'"
             for m in _re.finditer(pattern2, html):
-                url = urljoin("https://apkpure.com", m.group(1))
+                url = urljoin("https://apkpure.net", m.group(1))
                 if "/search" not in url:
                     candidates.append(url)
 
@@ -209,7 +212,7 @@ class ApkpureScraper(BaseScraper):
         if not candidates:
             pattern3 = r'href="(/(?:[^"]*?/)?' + escaped + r'[^"]*)"'
             for m in _re.finditer(pattern3, html):
-                url = urljoin("https://apkpure.com", m.group(1))
+                url = urljoin("https://apkpure.net", m.group(1))
                 if "/search" not in url:
                     candidates.append(url)
 

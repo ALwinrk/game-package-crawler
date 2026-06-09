@@ -15,7 +15,7 @@ from urllib.parse import urlparse, parse_qs
 from bs4 import BeautifulSoup
 
 from backend.config import get_settings
-from backend.core.http_client import http_get, stealth_get
+from backend.core.http_client import http_get, stealth_get, is_cloudflare_block
 from backend.db.database import get_connection
 from backend.logging_setup import get_logger
 
@@ -89,9 +89,19 @@ def _parse_cn_date(text: str) -> str | None:
 
 
 async def _fetch_page(url: str, retries: int = 2) -> tuple[int, str]:
+    """抓取页面: Fetcher 优先, 仅非 CF 失败时才降级 stealth_get.
+
+    v3.5: http_get 返回 CF 挑战页面时直接放弃,
+    因为 stealth_get 的 solve_cloudflare 也无法解决 interactive Turnstile,
+    降级只会触发 75s 超时循环, 浪费资源.
+    """
     status, html = await http_get(url)
     if status == 200 and len(html) > 500:
+        if is_cloudflare_block(html):
+            logger.debug("CF block detected for {}, skipping stealth fallback", url[:60])
+            return 0, f"Cloudflare blocked: {urlparse(url).hostname}"
         return status, html
+    # http_get 非 CF 失败 (网络错误/404等) → 降级 stealth_get
     for _ in range(retries):
         await asyncio.sleep(random.uniform(1.2, 2.5))
         status, html = await stealth_get(url)
@@ -156,7 +166,7 @@ def _parse_apkpure_html(html: str) -> list[dict]:
         for suffix in (" APK", " APKs", " MOD APK", " XAPK"):
             if app_name.endswith(suffix):
                 app_name = app_name[:-len(suffix)].strip()
-        detail_url = detail_href if detail_href.startswith("http") else f"https://apkpure.com{detail_href}"
+        detail_url = detail_href if detail_href.startswith("http") else f"https://apkpure.net{detail_href}"
         # 版本名: .info-sdk 文本如 "2.135.3 by Aniplex Inc."，取 " by" 之前的部分
         ver_el = item.select_one(".info-sdk")
         version_name = ""
@@ -239,14 +249,22 @@ def _parse_apkcombo_html(html: str) -> list[dict]:
 # ── 详情页抓取 (v2.8.2) ────────────────────────────────────
 
 async def _fetch_detail_time_apkpure(item: dict) -> dict:
-    """访问 APKPure 详情页获取真实更新时间 (http_get → stealth 降级)."""
+    """访问 APKPure 详情页获取真实更新时间 (http_get → stealth 降级).
+
+    v3.5: http_get 返回 CF 挑战页面时不降级 stealth_get,
+    因为 interactive Turnstile 无法被自动解决.
+    """
     async with _DETAIL_SEMAPHORE:
         detail_url = item.get("detail_url", "")
         if not detail_url:
             return item
         try:
             status, html = await http_get(detail_url)
-            # http_get 失败或疑似被 CF 拦截 → 降级 stealth_get
+            # v3.5: CF 拦截 → 不降级, 直接返回
+            if is_cloudflare_block(html):
+                logger.debug("APKPure detail CF blocked: {}", detail_url[:60])
+                return item
+            # http_get 失败 (非CF) → 降级 stealth_get
             if status != 200 or len(html) < 1000:
                 logger.debug("APKPure detail http_get failed ({}) for {}, trying stealth...",
                              status, detail_url[:60])
@@ -428,15 +446,19 @@ async def fetch_apkpure_updates(full_refresh: bool = False):
     cats = list(APKPURE_CATEGORIES)
     random.shuffle(cats)
     stopped_cats = 0
+    cf_blocked_cats = 0  # v3.5: 追踪 CF 拦截分类数
     for cat in cats:
         if not full_refresh and stopped_cats >= 3:
             logger.info("APKPure 连续 {} 个分类无新数据, 提前终止", stopped_cats)
             break
 
-        url = f"https://apkpure.com/cn/ranking/latest-updated-{cat}"
+        url = f"https://apkpure.net/cn/ranking/latest-updated-{cat}"
         try:
             status, html = await _fetch_page(url)
             if status != 200 or len(html) < 500:
+                # v3.5: 检测 CF 拦截
+                if status == 0 and "Cloudflare blocked" in str(html):
+                    cf_blocked_cats += 1
                 continue
             items = _parse_apkpure_html(html)
             new_count = 0
@@ -458,6 +480,9 @@ async def fetch_apkpure_updates(full_refresh: bool = False):
         await asyncio.sleep(random.uniform(2.0, 4.0))
 
     if not all_items:
+        # v3.5: 多个分类被 CF 拦截 → 记录 CF 失败加速熔断
+        if cf_blocked_cats >= 2:
+            await record_cf_failure("apkpure")
         logger.info("APKPure 无新数据, 跳过详情页富化")
         return []
     logger.info("APKPure incremental: {} new items from {} categories, enriching...",
@@ -689,9 +714,16 @@ async def save_incremental(source: str, items: list[dict]) -> None:
                      "",
                      item["updated_at"]),
                 )
-            # v3.4: 超过上限自动删除最旧的
+            # v3.5: 超过各源上限自动删除最旧
             settings = get_settings()
-            max_items = getattr(settings, "panel_max_items", 150)
+            _source_max_map = {
+                "apkpure": "apkpure_display_limit",
+                "apkcombo": "apkcombo_display_limit",
+                "apkcombo_trending": "apkcombo_trending_display_limit",
+                "apkvision_updated": "apkvision_display_limit",
+                "apkvision_new": "apkvision_new_display_limit",
+            }
+            max_items = getattr(settings, _source_max_map.get(source, "panel_max_items"), 150)
             conn.execute("""
                 DELETE FROM daily_updates WHERE source = ? AND id NOT IN (
                     SELECT id FROM daily_updates WHERE source = ?
@@ -705,8 +737,7 @@ async def save_incremental(source: str, items: list[dict]) -> None:
         finally:
             conn.close()
     await asyncio.to_thread(_sync)
-    logger.info("{} incremental: {} items merged (max={})", source, len(valid),
-                getattr(get_settings(), "panel_max_items", 150))
+    logger.info("{} incremental: {} items merged (max={})", source, len(valid), max_items)
 
 
 
@@ -775,7 +806,11 @@ async def is_circuit_open(source):
     return await asyncio.to_thread(_sync)
 
 
-async def record_failure(source):
+async def record_failure(source, weight: int = 1):
+    """记录失败, 支持权重 (CF 失败权重 2×, 更快触发降频/熔断).
+
+    v3.5: 新增 weight 参数, CF 特定失败传入 weight=2 加速响应.
+    """
     def _sync():
         conn = get_connection()
         try:
@@ -783,10 +818,10 @@ async def record_failure(source):
             conn.execute(
                 """INSERT INTO daily_updates_circuit_breaker
                    (source, consecutive_failures, last_failure_time, is_open, open_until)
-                   VALUES (?, 1, ?, 0, NULL)
+                   VALUES (?, ?, ?, 0, NULL)
                    ON CONFLICT(source) DO UPDATE SET
-                   consecutive_failures = consecutive_failures + 1, last_failure_time = ?""",
-                (source, now, now),
+                   consecutive_failures = consecutive_failures + ?, last_failure_time = ?""",
+                (source, weight, weight, now),
             )
             conn.commit()
             cur = conn.execute(
@@ -817,6 +852,16 @@ async def record_failure(source):
         finally:
             conn.close()
     await asyncio.to_thread(_sync)
+
+
+async def record_cf_failure(source):
+    """v3.5: CF 特定失败 — 2× 权重加速降频/熔断.
+
+    interactive Turnstile 无法被自动解决时, 继续重试只会浪费资源,
+    应更快速触发降频和熔断.
+    """
+    logger.warning("source {} hit Cloudflare block (interactive Turnstile?), fast-tracking cooldown", source)
+    await record_failure(source, weight=2)
 
 
 async def record_success(source):
