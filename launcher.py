@@ -105,16 +105,30 @@ def main():
     host = "127.0.0.1"
     port = 8000
 
-    # 检查端口是否被占用
+    # v3.5: 自动杀掉占用端口的旧进程
     import socket as _socket
     _sock = _socket.socket(_socket.AF_INET, _socket.SOCK_STREAM)
     _in_use = _sock.connect_ex((host, port)) == 0
     _sock.close()
     if _in_use:
-        print(f"[警告] 端口 {port} 已被占用, 尝试终止旧进程...")
+        print(f"[启动] 端口 {port} 已被占用, 正在终止旧进程...")
         if sys.platform == "win32":
-            os.system(f'netstat -ano | findstr :{port} | findstr LISTENING')
-        # 不阻止启动, uvicorn 会报明确的端口占用错误
+            import subprocess as _sp
+            try:
+                result = _sp.run(
+                    f'netstat -ano | findstr :{port} | findstr LISTENING',
+                    capture_output=True, text=True, shell=True,
+                )
+                for line in result.stdout.strip().split('\n'):
+                    parts = line.split()
+                    if parts and parts[-1].isdigit():
+                        pid = parts[-1]
+                        _sp.run(f'taskkill /F /PID {pid}', capture_output=True, shell=True)
+                        print(f"[启动] 已终止旧进程 PID={pid}")
+            except Exception:
+                pass
+        # 短暂等待端口释放
+        time.sleep(1.5)
 
     # 后台打开浏览器
     def open_browser():
