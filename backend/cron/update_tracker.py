@@ -578,7 +578,7 @@ async def fetch_apkcombo_trending_updates(full_refresh: bool = False):
 # ── APKVision 抓取 (v3.1) ─────────────────────────────────
 
 async def fetch_apkvision_updated():
-    """抓取 APKVision 最近更新页面: /updated/ (仅取前 20 条).
+    """抓取 APKVision 最近更新页面: /updated/ (v3.5: 上限 40).
 
     v3.2: APKVision 列表页 URL 使用语义化 slug (非包名), 需访问详情页
     提取 Google Play 链接获取真实包名 + 精确更新时间.
@@ -589,7 +589,7 @@ async def fetch_apkvision_updated():
         raise Exception(f"APKVision updated page failed: HTTP {status}")
     soup = BeautifulSoup(html, "html.parser")
     items: list[dict] = []
-    for article in soup.select(".main-news-grid .main-news")[:20]:
+    for article in soup.select(".main-news-grid .main-news")[:40]:
         name_el = article.select_one(".main-news-title")
         app_name = name_el.get_text(strip=True) if name_el else ""
         if not app_name or len(app_name) < 2:
@@ -622,7 +622,7 @@ async def fetch_apkvision_updated():
 
 
 async def fetch_apkvision_new():
-    """抓取 APKVision 新游戏页面: /games/ (Best New Games + 普通列表, 仅取前 20 条).
+    """抓取 APKVision 新游戏页面: /games/ (Best New Games + 普通列表, v3.5: 上限 40).
 
     v3.2: APKVision 列表页 URL 使用语义化 slug (非包名), 需访问详情页
     提取 Google Play 链接获取真实包名 + 精确更新时间.
@@ -637,7 +637,7 @@ async def fetch_apkvision_new():
 
     def _parse_articles(article_list):
         for article in article_list:
-            if len(items) >= 20:
+            if len(items) >= 40:
                 return
             name_el = article.select_one(".mainb-title") or article.select_one(".main-news-title")
             app_name = name_el.get_text(strip=True) if name_el else ""
@@ -667,7 +667,7 @@ async def fetch_apkvision_new():
     # 先取 Best New Games (.mainb-grid .mainb-item)
     _parse_articles(soup.select(".mainb-grid .mainb-item"))
     # 若不足 20，再取下方普通列表 (.main-news-grid .main-news)
-    if len(items) < 20:
+    if len(items) < 40:
         _parse_articles(soup.select(".main-news-grid .main-news"))
 
     if not items:
