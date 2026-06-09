@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import uuid
+from datetime import timedelta
 from io import BytesIO
 from pathlib import Path
 from typing import Any
@@ -673,7 +674,8 @@ async def daily_updates(
 
     result["poll_interval"] = getattr(settings, "frontend_poll_interval", 300)
     if last_mod:
-        result["last_fetched_at"] = last_mod.strftime("%Y-%m-%d %H:%M:%S")
+        beijing_time = last_mod + timedelta(hours=8)
+        result["last_fetched_at"] = beijing_time.strftime("%Y-%m-%d %H:%M:%S")
 
     headers = {}
     if last_mod:
