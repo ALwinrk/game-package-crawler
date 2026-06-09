@@ -25,10 +25,10 @@
   "daily_updates_pages": 3,
   "daily_updates_limit": 100,
   "frontend_poll_interval": 300,
-  "panel_max_items": 200,
-  "apkpure_display_limit": 60,
-  "apkcombo_display_limit": 40,
-  "apkcombo_trending_display_limit": 60,
-  "apkvision_display_limit": 30,
-  "apkvision_new_display_limit": 30
+  "panel_max_items": 300,
+  "apkpure_display_limit": 90,
+  "apkcombo_display_limit": 60,
+  "apkcombo_trending_display_limit": 90,
+  "apkvision_display_limit": 40,
+  "apkvision_new_display_limit": 40
 }

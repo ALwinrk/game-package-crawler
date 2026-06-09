@@ -635,11 +635,11 @@ async def daily_updates(
 
     # v3.4: 每个源使用独立的展示上限
     _display_limits = {
-        "apkpure": getattr(settings, "apkpure_display_limit", 60),
-        "apkcombo": getattr(settings, "apkcombo_display_limit", 40),
-        "apkcombo_trending": getattr(settings, "apkcombo_trending_display_limit", 60),
-        "apkvision_updated": getattr(settings, "apkvision_display_limit", 30),
-        "apkvision_new": getattr(settings, "apkvision_new_display_limit", 30),
+        "apkpure": getattr(settings, "apkpure_display_limit", 90),
+        "apkcombo": getattr(settings, "apkcombo_display_limit", 60),
+        "apkcombo_trending": getattr(settings, "apkcombo_trending_display_limit", 90),
+        "apkvision_updated": getattr(settings, "apkvision_display_limit", 40),
+        "apkvision_new": getattr(settings, "apkvision_new_display_limit", 40),
     }
 
     conn = _get_conn()

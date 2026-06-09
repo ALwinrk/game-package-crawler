@@ -53,12 +53,12 @@ class Settings(BaseSettings):
     daily_updates_pages: int = 3         # 每个源抓取页数
     daily_updates_limit: int = 20        # API 默认返回条数
     frontend_poll_interval: int = 300    # 前端轮询间隔(秒), 默认5分钟
-    panel_max_items: int = 200           # v3.5: 每源数据库保留上限（取各源上限最大值）
-    apkpure_display_limit: int = 60      # v3.5: APKPure 面板展示条数
-    apkcombo_display_limit: int = 40     # v3.5: APKCombo 面板展示条数
-    apkcombo_trending_display_limit: int = 60  # v3.5: APKCombo Trending 展示条数
-    apkvision_display_limit: int = 30    # v3.5: APKVision Updated 面板展示条数
-    apkvision_new_display_limit: int = 30     # v3.5: APKVision New 面板展示条数
+    panel_max_items: int = 300           # v3.5: 每源数据库保留上限（取各源上限最大值）
+    apkpure_display_limit: int = 90      # v3.5: APKPure 面板展示条数
+    apkcombo_display_limit: int = 60     # v3.5: APKCombo 面板展示条数
+    apkcombo_trending_display_limit: int = 90  # v3.5: APKCombo Trending 展示条数
+    apkvision_display_limit: int = 40    # v3.5: APKVision Updated 面板展示条数
+    apkvision_new_display_limit: int = 40     # v3.5: APKVision New 面板展示条数
 
     class Config:
         env_prefix = "CRAWLER_"

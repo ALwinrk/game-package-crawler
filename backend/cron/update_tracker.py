@@ -723,7 +723,7 @@ async def save_incremental(source: str, items: list[dict]) -> None:
                 "apkvision_updated": "apkvision_display_limit",
                 "apkvision_new": "apkvision_new_display_limit",
             }
-            max_items = getattr(settings, _source_max_map.get(source, "panel_max_items"), 150)
+            max_items = getattr(settings, _source_max_map.get(source, "panel_max_items"), 300)
             conn.execute("""
                 DELETE FROM daily_updates WHERE source = ? AND id NOT IN (
                     SELECT id FROM daily_updates WHERE source = ?

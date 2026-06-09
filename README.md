@@ -210,12 +210,12 @@ python backend/main.py
   "daily_updates_pages": 3,
   "daily_updates_limit": 100,
   "frontend_poll_interval": 300,
-  "panel_max_items": 200,
-  "apkpure_display_limit": 60,
-  "apkcombo_display_limit": 40,
-  "apkcombo_trending_display_limit": 60,
-  "apkvision_display_limit": 30,
-  "apkvision_new_display_limit": 30,
+  "panel_max_items": 300,
+  "apkpure_display_limit": 90,
+  "apkcombo_display_limit": 60,
+  "apkcombo_trending_display_limit": 90,
+  "apkvision_display_limit": 40,
+  "apkvision_new_display_limit": 40,
   "log_level": "INFO",
   "log_retention_days": 30
 }
@@ -241,12 +241,12 @@ python backend/main.py
 | `daily_updates_pages` | int | 3 | ✅ | 每个源抓取页数 |
 | `daily_updates_limit` | int | 100 | ✅ | API 默认返回条数 |
 | `frontend_poll_interval` | int | 300 | ✅ | 前端轮询间隔 (5分钟) |
-| `panel_max_items` | int | 200 | ✅ | 每源数据库保留上限 |
-| `apkpure_display_limit` | int | 60 | ✅ | APKPure 面板展示条数 |
-| `apkcombo_display_limit` | int | 40 | ✅ | APKCombo 面板展示条数 |
-| `apkcombo_trending_display_limit` | int | 60 | ✅ | APKCombo Trending 展示条数 |
-| `apkvision_display_limit` | int | 30 | ✅ | APKVision Updated 展示条数 |
-| `apkvision_new_display_limit` | int | 30 | ✅ | APKVision New 展示条数 |
+| `panel_max_items` | int | 300 | ✅ | 每源数据库保留上限 |
+| `apkpure_display_limit` | int | 90 | ✅ | APKPure 面板展示条数 |
+| `apkcombo_display_limit` | int | 60 | ✅ | APKCombo 面板展示条数 |
+| `apkcombo_trending_display_limit` | int | 90 | ✅ | APKCombo Trending 展示条数 |
+| `apkvision_display_limit` | int | 40 | ✅ | APKVision Updated 展示条数 |
+| `apkvision_new_display_limit` | int | 40 | ✅ | APKVision New 展示条数 |
 | `log_level` | str | `INFO` | ✅ | 日志级别 (DEBUG/INFO/WARNING/ERROR) |
 | `log_retention_days` | int | 30 | ✅ | 日志保留天数 |
 
@@ -322,7 +322,7 @@ build_exe.bat
 | v3.2 | **启动优化**: DB 缓存预热，有数据立即可用。**EXE 数据持久化**: 工作目录改为 EXE 所在目录。**配置安全**: 热更新白名单移除敏感字段 + 数值类型校验。**手动刷新**: 触发实际爬取并等待完成。**APKPure 优化**: 分类砍半 + stealth 降级 + 批次间暂停。**UI**: 右键复制包名、实时面板置顶。**前端**: 所有 fetch 增加 resp.ok 检查 + catch 块日志 |
 | v3.3 | **反封禁**: TLS 指纹轮换 (5 指纹池) + 分类随机顺序 + 间隔随机化 3-7s。**Chromium 持久化**: 复制到 EXE 目录防杀软拦截，启动零 EPIPE。**浏览器反检测**: AutomationControlled + 随机 viewport + stealth 脚本。**熔断增强**: API 手工重置 + 连续失败自动降频至 7200s。**下载修复**: APKCombo/APKPure URL 双语言码修复 + HTML 页面自动降级 Playwright + JS 触发带 Referer 下载。**UI**: 结果表格三按钮 (详情页/浏览器下载/点击下载) |
 | v3.4 | **增量更新**: Top-N 增量+提前终止算法, 定时更新请求量 -83%。**入库去重**: (source,package) 唯一索引 + INSERT OR REPLACE 合并。**容量控制**: 数据库 150/面板 90-90-60 分源可配。**双刷新模式**: 全量/增量按钮 + 刷新面板按钮。**首次全量**: full_refresh 标志跳过提前终止。**服务器部署**: ms-playwright Chromium 兜底。**EXE 稳定性**: 全局异常捕获 + 端口占用检查 + 版本号统一 v3.4 |
-| v3.5 | **CF 防护**: StealthySession 子类限制 CF 求解递归 (_MAX_CF_SOLVE_ATTEMPTS=2), 防止 interactive Turnstile 无限循环。**域名切换**: APKPure 主域名 apkpure.com → apkpure.net (Fetcher 可用)。**CF 感知熔断**: record_cf_failure 2× 权重加速降频/熔断。**面板调整**: 各源独立展示上限 (60/40/60/30/30)。**刷新改版**: fire-and-forget 模式，点击立即返回，后台执行 + 前端自动轮询，彻底解决超时等待。**超时优化**: stealth_timeout 45→30s |
+| v3.5 | **CF 防护**: StealthySession 子类限制 CF 求解递归 (_MAX_CF_SOLVE_ATTEMPTS=2), 防止 interactive Turnstile 无限循环。**域名切换**: APKPure 主域名 apkpure.com → apkpure.net (Fetcher 可用)。**CF 感知熔断**: record_cf_failure 2× 权重加速降频/熔断。**面板调整**: 各源独立展示上限 (90/60/90/40/40)。**刷新改版**: fire-and-forget 模式，点击立即返回，后台执行 + 前端自动轮询，彻底解决超时等待。**超时优化**: stealth_timeout 45→30s |
 
 详见: `版本总历史.md`、`系统工作流程\系统工作流程.md`
 
