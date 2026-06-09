@@ -112,10 +112,24 @@ class ApkpureScraper(BaseScraper):
         )
 
     def _extract_app_name(self, html: str) -> str | None:
-        """从 APKPure 详情页提取应用名."""
+        """从 APKPure 详情页提取应用名.
+
+        v3.5: apkpure.net 上 data-dt-title 不是应用名, h1 无 class,
+        改用 h1 文本兜底.
+        """
+        # 策略 1: h1 标签 (apkpure.net 通用)
+        m = _re.search(r'<h1[^>]*>([^<]+)</h1>', html, _re.IGNORECASE)
+        if m:
+            name = m.group(1).strip()
+            if len(name) > 1:
+                return name
+        # 策略 2: data-dt-title (apkpure.com 旧版)
         m = _re.search(r'data-dt-title\s*=\s*"([^"]+)"', html)
         if m:
-            return m.group(1).strip()
+            val = m.group(1).strip()
+            if val and val not in ("home", "nav_game", "nav_app"):
+                return val
+        # 策略 3: class 选择器回退
         for pattern in [
             r'<h1[^>]*class="[^"]*title[^"]*"[^>]*>([^<]+)</h1>',
             r'<div[^>]*class="[^"]*app-title[^"]*"[^>]*>([^<]+)</div>',
@@ -128,28 +142,34 @@ class ApkpureScraper(BaseScraper):
     def _extract_whats_new(self, html: str) -> str | None:
         """从 APKPure 详情页提取更新内容.
 
-        策略 (按优先级):
-        1. 匹配 .whats-new-container 内的 p.text 段落
-        2. 匹配 .show-more-content 内的所有文本
-        3. data-dt-whatsnew 属性 (fallback, 通常只有标题)
+        v3.5 策略 (apkpure.net 适配):
+        1. .whats-new 或 [class*='whats-new'] 元素内容
+        2. .whats-new-container 内的 p.text 段落 (apkpure.com 旧版)
+        3. .show-more-content 回退
+        4. data-dt-whatsnew 属性 (fallback)
         """
-        # 策略 1: APKPure 标准结构 — .whats-new-container 内的 p.text
-        container_match = _re.search(
-            r'<div[^>]*class="[^"]*whats-new-container[^"]*"[^>]*>(.*?)</div>\s*(?:</div>)?\s*</div>\s*</div>',
-            html, _re.DOTALL | _re.IGNORECASE,
-        )
-        if container_match:
-            parts = []
-            for p in _re.finditer(r'<p[^>]*class="[^"]*text[^"]*"[^>]*>(.*?)</p>', container_match.group(1), _re.DOTALL):
-                text = self._clean_html(p.group(1).strip())
-                if text and not _re.match(r'^last updated', text, _re.IGNORECASE):
-                    parts.append(text)
-            if parts:
-                result = '\n'.join(parts)
-                if len(result) > 30:
-                    return result
+        # 策略 1: .whats-new 元素 (apkpure.net 标准)
+        for sel in (r'<div[^>]*class="[^"]*whats-new[^"]*"[^>]*>(.*?)</div>',
+                     r'<div[^>]*class="[^"]*whats-new-container[^"]*"[^>]*>(.*?)</div>\s*(?:</div>)?\s*</div>\s*</div>'):
+            m = _re.search(sel, html, _re.DOTALL | _re.IGNORECASE)
+            if m:
+                parts = []
+                for p in _re.finditer(r'<p[^>]*class="[^"]*text[^"]*"[^>]*>(.*?)</p>', m.group(1), _re.DOTALL):
+                    text = self._clean_html(p.group(1).strip())
+                    if text and not _re.match(r'^last updated', text, _re.IGNORECASE):
+                        parts.append(text)
+                if not parts:
+                    content = self._clean_html(m.group(1).strip())
+                    if content and len(content) > 30:
+                        # 去掉 "最新版本X.X.X的更新日志" 前缀
+                        content = _re.sub(r'^最新版本[\d.]+的更新日志\s*', '', content)
+                        return content
+                if parts:
+                    result = '\n'.join(parts)
+                    if len(result) > 30:
+                        return result
 
-        # 策略 2: .show-more-content 内的所有文本
+        # 策略 2: .show-more-content 回退 (通常是游戏描述, 非更新内容)
         show_match = _re.search(
             r'<div[^>]*class="[^"]*show-more-content[^"]*"[^>]*>(.*?)</div>\s*</div>',
             html, _re.DOTALL | _re.IGNORECASE,
