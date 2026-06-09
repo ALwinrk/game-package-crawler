@@ -1,10 +1,10 @@
 @echo off
 chcp 65001 >nul
 cd /d "%~dp0"
-title 游戏包名爬虫系统 v3.0 — 服务器部署
+title 游戏包名爬虫系统 v3.4 — 服务器部署
 
 echo ============================================
-echo   游戏包名爬虫系统 v3.0 — 服务器部署
+echo   游戏包名爬虫系统 v3.4 — 服务器部署
 echo ============================================
 echo.
 
@@ -22,7 +22,7 @@ echo   端口 8000 已放行
 
 :: 2. 开机自启
 echo [2/3] 设置开机自启...
-set "EXE_PATH=%~dp0游戏包名爬虫系统.exe"
+set "EXE_PATH=%~dp0游戏包名爬虫系统_v3.1.exe"
 schtasks /delete /tn "游戏包名爬虫系统" /f >nul 2>&1
 schtasks /create /tn "游戏包名爬虫系统" /tr "\"%EXE_PATH%\"" /sc onstart /delay 0000:30 /rl highest /f >nul 2>&1
 echo   开机自启已设置

@@ -8,7 +8,7 @@
   "retry_delay": 1.0,
   "batch_concurrency": 5,
   "cache_ttl_seconds": 300,
-  "proxy": "http://127.0.0.1:7892",
+  "proxy": "http://127.0.0.1:7897",
   "enabled_sites": [
     "google_play",
     "apkpure",
@@ -24,5 +24,9 @@
   "update_check_interval": 1800,
   "daily_updates_pages": 3,
   "daily_updates_limit": 100,
-  "frontend_poll_interval": 300
+  "frontend_poll_interval": 300,
+  "panel_max_items": 150,
+  "apkpure_display_limit": 90,
+  "apkcombo_display_limit": 90,
+  "apkvision_display_limit": 60
 }

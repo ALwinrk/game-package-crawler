@@ -415,40 +415,61 @@ async def _enrich_apkvision_items(items: list[dict], max_enrich: int = 40) -> li
 
 # ── 列表页抓取 ──────────────────────────────────────────────
 
-async def fetch_apkpure_updates():
-    """抓取 APKPure 排名页面所有分类: 18 个分类 × 每类约 10 款游戏."""
+async def fetch_apkpure_updates(full_refresh: bool = False):
+    """抓取 APKPure 排名页面.
+
+    full_refresh=True: 全量 — 不提前终止, 抓所有分类, 不限新/旧
+    full_refresh=False: 增量 — 遇已知包名提前终止
+    """
+    existing = _load_existing_packages("apkpure") if not full_refresh else set()
     all_items: list[dict] = []
     seen_pkgs: set[str] = set()
-    for cat in APKPURE_CATEGORIES:
+
+    cats = list(APKPURE_CATEGORIES)
+    random.shuffle(cats)
+    stopped_cats = 0
+    for cat in cats:
+        if not full_refresh and stopped_cats >= 3:
+            logger.info("APKPure 连续 {} 个分类无新数据, 提前终止", stopped_cats)
+            break
+
         url = f"https://apkpure.com/cn/ranking/latest-updated-{cat}"
         try:
             status, html = await _fetch_page(url)
             if status != 200 or len(html) < 500:
-                logger.warning("APKPure category {} failed: HTTP {}", cat, status)
                 continue
             items = _parse_apkpure_html(html)
-            # 跨分类去重
             new_count = 0
             for item in items:
-                if item["package_name"] not in seen_pkgs:
-                    seen_pkgs.add(item["package_name"])
+                pkg = item["package_name"]
+                if pkg not in seen_pkgs:
+                    seen_pkgs.add(pkg)
                     all_items.append(item)
                     new_count += 1
-            logger.debug("APKPure category {}: {} items ({} new)", cat, len(items), new_count)
+
+            if new_count == 0:
+                stopped_cats += 1
+                logger.debug("APKPure {} 无新数据 ({} 个已存在)", cat, len(items))
+            else:
+                stopped_cats = 0
+                logger.debug("APKPure {}: {} new / {} total", cat, new_count, len(items))
         except Exception as exc:
             logger.warning("APKPure category {} error: {}", cat, exc)
-        await asyncio.sleep(random.uniform(2.5, 5.0))
+        await asyncio.sleep(random.uniform(2.0, 4.0))
+
     if not all_items:
-        raise Exception("APKPure all categories parse empty")
-    logger.info("APKPure list fetched: {} unique items from {} categories, enriching...",
+        logger.info("APKPure 无新数据, 跳过详情页富化")
+        return []
+    logger.info("APKPure incremental: {} new items from {} categories, enriching...",
                 len(all_items), len(APKPURE_CATEGORIES))
-    all_items = await _enrich_with_detail_times(all_items, "apkpure", max_enrich=80)
+    all_items = await _enrich_with_detail_times(all_items, "apkpure", max_enrich=30)
     logger.info("APKPure enriched: {} items", len(all_items))
     return all_items
 
 
 async def fetch_apkcombo_updates():
-    """抓取 APKCombo 热门游戏页面: zh/category/game/ (按下载量排序)."""
+    """v3.4 增量: 只抓热门首页, 仅富化新游戏."""
+    existing = _load_existing_packages("apkcombo")
     url = "https://apkcombo.com/zh/category/game/"
     status, html = await _fetch_page(url)
     if status != 200 or len(html) < 500:
@@ -456,27 +477,38 @@ async def fetch_apkcombo_updates():
     items: list[dict] = _parse_apkcombo_html(html)
     if not items:
         raise Exception("APKCombo parse empty, page structure may have changed")
-    logger.info("APKCombo list fetched: {} items, enriching details...", len(items))
-    items = await _enrich_with_detail_times(items, "apkcombo", max_enrich=100)
-    logger.info("APKCombo enriched: {} items", len(items))
-    return items
+
+    # 仅保留新游戏
+    new_items = [it for it in items if it["package_name"] not in existing]
+    logger.info("APKCombo list: {} total, {} new", len(items), len(new_items))
+    if not new_items:
+        return []
+    new_items = await _enrich_with_detail_times(new_items, "apkcombo", max_enrich=20)
+    logger.info("APKCombo enriched: {} items", len(new_items))
+    return new_items
 
 
 async def fetch_apkcombo_trending_updates():
-    """抓取 APKCombo 最新更新页面 (50K+ 下载量游戏来源)."""
+    """v3.4 增量: 逐页抓取, 遇到大量已知包名则提前终止."""
+    existing = _load_existing_packages("apkcombo")
+    existing.update(_load_existing_packages("apkcombo_trending"))
     items: list[dict] = []
-    for page in range(1, 4):  # 3 页
+    new_in_page = 999
+    for page in range(1, 5):
+        if new_in_page < 3:  # 本页新数据 < 3 个 → 提前终止
+            logger.info("APKCombo trending page {} 仅 {} 个新数据, 提前终止", page - 1, new_in_page)
+            break
         url = f"https://apkcombo.com/zh/category/game/latest-updates/?page={page}"
         status, html = await _fetch_page(url)
         if status != 200 or len(html) < 500:
             break
-        # 复用热点页解析器 (结构兼容)
         soup = BeautifulSoup(html, "html.parser")
         links = soup.select(".l_item")
+        new_in_page = 0
         for link in links:
             href = _extract_attr(link, "href")
             pkg = _extract_pkg_from_href(href)
-            if not pkg:
+            if not pkg or pkg in existing:
                 continue
             name_el = link.select_one(".name")
             app_name = name_el.get_text(strip=True) if name_el else _extract_attr(link, "title").replace(" APK", "").strip()
@@ -485,22 +517,21 @@ async def fetch_apkcombo_trending_updates():
             app_lower = app_name.lower()
             if any(kw in app_lower for kw in _APKCOMBO_EXCLUDE_KEYWORDS):
                 continue
+            existing.add(pkg)
             detail_url = href if href.startswith("http") else f"https://apkcombo.com{href}"
             icon_url = _extract_icon(link, ["figure img.lzl", "figure img[data-src]", "figure img"])
             items.append({
-                "icon_url": icon_url,
-                "app_name": app_name,
-                "package_name": pkg,
-                "detail_url": detail_url,
-                "download_count": "",
-                "version_name": "",
-                "updated_at": None,
+                "icon_url": icon_url, "app_name": app_name, "package_name": pkg,
+                "detail_url": detail_url, "download_count": "", "version_name": "", "updated_at": None,
             })
-        await asyncio.sleep(random.uniform(0.8, 1.5))
+            new_in_page += 1
+        logger.debug("APKCombo trending page {}: {} new", page, new_in_page)
+        await asyncio.sleep(random.uniform(1.0, 2.0))
     if not items:
-        raise Exception("APKCombo trending parse empty")
-    logger.info("APKCombo trending fetched: {} items, enriching...", len(items))
-    items = await _enrich_with_detail_times(items, "apkcombo", max_enrich=90)
+        logger.info("APKCombo trending 无新数据")
+        return []
+    logger.info("APKCombo trending: {} new items, enriching...", len(items))
+    items = await _enrich_with_detail_times(items, "apkcombo", max_enrich=30)
     logger.info("APKCombo trending enriched: {} items", len(items))
     return items
 
@@ -610,11 +641,78 @@ async def fetch_apkvision_new():
     return items
 
 
-# ── 入库 ─────────────────────────────────────────────────
+# ── 增量更新辅助 (v3.4) ────────────────────────────────────
+
+def _load_existing_packages(source: str) -> set[str]:
+    """从数据库加载某源已有的包名集合（用于提前终止判断）."""
+    conn = get_connection()
+    try:
+        rows = conn.execute(
+            "SELECT package_name FROM daily_updates WHERE source = ?", (source,)
+        ).fetchall()
+        return {r[0] for r in rows}
+    finally:
+        conn.close()
+
+
+async def save_incremental(source: str, items: list[dict]) -> None:
+    """v3.4 追加入库 — INSERT OR REPLACE 合并, 超限自动删旧.
+
+    - 新包名 → INSERT 追加
+    - 已存在 → REPLACE 更新
+    - 旧数据 → 保持不变
+    - 总数超 panel_max_items → 删除最旧的条目
+    """
+    valid = [it for it in items if it.get("updated_at")]
+    if not valid:
+        logger.info("{} no new items to save", source)
+        return
+
+    def _sync() -> None:
+        from backend.config import get_settings
+        conn = get_connection()
+        try:
+            conn.execute("BEGIN")
+            for item in valid:
+                conn.execute(
+                    """INSERT OR REPLACE INTO daily_updates
+                       (source, icon_url, detail_url, app_name, package_name,
+                        download_count, version_name, version_code, updated_at)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (source,
+                     item.get("icon_url", ""),
+                     item.get("detail_url", ""),
+                     item.get("app_name", ""),
+                     item["package_name"],
+                     item.get("download_count", ""),
+                     item.get("version_name", ""),
+                     "",
+                     item["updated_at"]),
+                )
+            # v3.4: 超过上限自动删除最旧的
+            settings = get_settings()
+            max_items = getattr(settings, "panel_max_items", 150)
+            conn.execute("""
+                DELETE FROM daily_updates WHERE source = ? AND id NOT IN (
+                    SELECT id FROM daily_updates WHERE source = ?
+                    ORDER BY updated_at DESC LIMIT ?
+                )
+            """, (source, source, max_items))
+            conn.execute("COMMIT")
+        except Exception:
+            conn.execute("ROLLBACK")
+            raise
+        finally:
+            conn.close()
+    await asyncio.to_thread(_sync)
+    logger.info("{} incremental: {} items merged (max={})", source, len(valid),
+                getattr(get_settings(), "panel_max_items", 150))
+
+
+
 
 async def save_updates(source: str, items: list[dict]) -> None:
-    """事务入库 — 先删后插, 仅保存有真实更新时间的条目."""
-    # 过滤: 只保留有真实更新时间的条目
+    """全量入库 — 先删后插 (用于手动刷新或首次加载)."""
     valid = [it for it in items if it.get("updated_at")]
     if not valid:
         logger.warning("{} no items with real dates, skipping save", source)
@@ -648,7 +746,7 @@ async def save_updates(source: str, items: list[dict]) -> None:
         finally:
             conn.close()
     await asyncio.to_thread(_sync)
-    logger.info("{} saved {} items to DB", source, len(valid))
+    logger.info("{} full save: {} items to DB", source, len(valid))
 
 
 # ── 熔断器 ───────────────────────────────────────────────
@@ -696,14 +794,26 @@ async def record_failure(source):
                 (source,),
             )
             row = cur.fetchone()
-            if row and row[0] >= 3:
-                open_until = (datetime.now() + timedelta(minutes=30)).isoformat()
-                conn.execute(
-                    "UPDATE daily_updates_circuit_breaker SET is_open=1, open_until=? WHERE source=?",
-                    (open_until, source),
-                )
-                conn.commit()
-                logger.warning("source {} failed {} times, circuit open 30min", source, row[0])
+            if row:
+                # v3.3: 连续失败 2 次 → 自动降频至 7200s (在熔断打开前温和限制)
+                if row[0] >= 2:
+                    settings = get_settings()
+                    current = getattr(settings, "update_check_interval", 1800)
+                    if current < 7200:
+                        try:
+                            settings.update({"update_check_interval": 7200})
+                        except ValueError:
+                            pass
+                        logger.warning("source {} 连续失败 {} 次, 自动降频至 7200s", source, row[0])
+                # 连续失败 3 次 → 熔断打开
+                if row[0] >= 3:
+                    open_until = (datetime.now() + timedelta(minutes=30)).isoformat()
+                    conn.execute(
+                        "UPDATE daily_updates_circuit_breaker SET is_open=1, open_until=? WHERE source=?",
+                        (open_until, source),
+                    )
+                    conn.commit()
+                    logger.warning("source {} failed {} times, circuit open 30min", source, row[0])
         finally:
             conn.close()
     await asyncio.to_thread(_sync)
@@ -725,11 +835,26 @@ async def record_success(source):
         finally:
             conn.close()
     await asyncio.to_thread(_sync)
+    # v3.3: 成功率恢复后, 尝试恢复默认更新间隔
+    settings = get_settings()
+    current = getattr(settings, "update_check_interval", 1800)
+    if current > 1800:
+        try:
+            settings.update({"update_check_interval": 1800})
+        except ValueError:
+            pass
+        logger.info("source {} 恢复成功, 更新间隔恢复为 1800s", source)
 
 
 # ── 编排 ─────────────────────────────────────────────────
 
-async def fetch_source_with_circuit_breaker(source):
+async def fetch_source_with_circuit_breaker(source, full_refresh: bool = False):
+    """带熔断的源抓取.
+
+    Args:
+        source: 数据源标识
+        full_refresh: True=全量刷新(手动), False=增量更新(自动定时)
+    """
     if await is_circuit_open(source):
         logger.warning("source {} circuit open, skipping", source)
         return
@@ -741,35 +866,47 @@ async def fetch_source_with_circuit_breaker(source):
             "apkvision_updated": fetch_apkvision_updated,
             "apkvision_new": fetch_apkvision_new,
         }
-        items = await fn_map[source]()
+        if source == "apkpure":
+            items = await fn_map[source](full_refresh=full_refresh)
+        else:
+            items = await fn_map[source]()
         if not items:
-            raise Exception(f"{source} parse returned empty")
-        await save_updates(source, items)
+            if full_refresh:
+                raise Exception(f"{source} full refresh returned empty (site may be down)")
+            # v3.4: 增量模式下空结果 = 无新数据, 正常
+            logger.info("{} no new items, skipping save", source)
+            await record_success(source)
+            return
+        if full_refresh:
+            await save_updates(source, items)
+        else:
+            await save_incremental(source, items)
         await record_success(source)
     except Exception as e:
         logger.error("fetch {} failed: {}", source, e)
         await record_failure(source)
 
 
-async def update_once():
+async def update_once(full_refresh: bool = False):
     await asyncio.gather(
-        fetch_source_with_circuit_breaker("apkpure"),
-        fetch_source_with_circuit_breaker("apkcombo"),
-        fetch_source_with_circuit_breaker("apkcombo_trending"),
-        fetch_source_with_circuit_breaker("apkvision_updated"),
-        fetch_source_with_circuit_breaker("apkvision_new"),
+        fetch_source_with_circuit_breaker("apkpure", full_refresh=full_refresh),
+        fetch_source_with_circuit_breaker("apkcombo", full_refresh=full_refresh),
+        fetch_source_with_circuit_breaker("apkcombo_trending", full_refresh=full_refresh),
+        fetch_source_with_circuit_breaker("apkvision_updated", full_refresh=full_refresh),
+        fetch_source_with_circuit_breaker("apkvision_new", full_refresh=full_refresh),
         return_exceptions=True,
     )
     set_last_modified(datetime.now(timezone.utc))
 
 
 async def run_periodic_updates():
+    # 首次启动: 全量刷新
     try:
-        await update_once()
+        await update_once(full_refresh=True)
     except asyncio.CancelledError:
         raise
     except Exception as e:
-        logger.error("initial update failed: {}", e)
+        logger.error("initial full refresh failed: {}", e)
     while True:
         settings = get_settings()
         interval = getattr(settings, "update_check_interval", 1800)
@@ -778,10 +915,12 @@ async def run_periodic_updates():
         except asyncio.CancelledError:
             break
         try:
-            await update_once()
-            logger.info("daily updates panel refreshed")
+            # 定时更新: 增量模式
+            await update_once(full_refresh=False)
+            logger.info("daily updates panel refreshed (incremental)")
         except asyncio.CancelledError:
-            raise
+            break
         except Exception as e:
             logger.error("periodic update error: {}", e)
-    logger.info("每日更新面板后台任务已停止")
+
+

@@ -165,7 +165,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="游戏包名爬虫系统",
     description="Android APK 版本排查工具 — 后端 API",
-    version="3.0.0",
+    version="3.4.0",
     lifespan=lifespan,
 )
 

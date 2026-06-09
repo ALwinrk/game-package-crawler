@@ -53,6 +53,11 @@ class Settings(BaseSettings):
     daily_updates_pages: int = 3         # 每个源抓取页数
     daily_updates_limit: int = 20        # API 默认返回条数
     frontend_poll_interval: int = 300    # 前端轮询间隔(秒), 默认5分钟
+    panel_max_items: int = 150           # v3.4: 每源数据库保留上限，超限自动删旧
+    apkpure_display_limit: int = 90      # v3.4: APKPure 面板展示条数
+    apkcombo_display_limit: int = 90     # v3.4: APKCombo 面板展示条数
+    apkvision_display_limit: int = 60    # v3.4: APKVision 面板展示条数
+    panel_max_items: int = 300           # v3.4: 每源数据库保留上限，超限自动删旧
 
     class Config:
         env_prefix = "CRAWLER_"
@@ -85,6 +90,8 @@ class Settings(BaseSettings):
         "enabled_sites",
         "update_check_interval", "daily_updates_pages",
         "daily_updates_limit", "frontend_poll_interval",
+        "panel_max_items", "apkpure_display_limit",
+        "apkcombo_display_limit", "apkvision_display_limit",
         "proxy",
     }
 
@@ -96,6 +103,8 @@ class Settings(BaseSettings):
         "request_timeout", "stealth_timeout",
         "update_check_interval", "daily_updates_pages",
         "daily_updates_limit", "frontend_poll_interval",
+        "panel_max_items", "apkpure_display_limit",
+        "apkcombo_display_limit", "apkvision_display_limit",
     }
 
     def update(self, changes: dict[str, Any]) -> None:

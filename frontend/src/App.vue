@@ -7,7 +7,7 @@
     <div v-if="!backendReady" class="loading-screen">
       <div class="loading-content">
         <span class="loading-logo">🚀</span>
-        <h2>游戏包名爬虫系统 v3.0</h2>
+        <h2>游戏包名爬虫系统 v3.4</h2>
         <p class="loading-text">正在唤醒后端服务，请稍候...</p>
         <el-progress :percentage="loadingDots" :indeterminate="true" :stroke-width="4" color="var(--color-primary)" class="loading-bar" />
         <p class="loading-sub">首次启动需初始化浏览器引擎 (约 3-5 秒)</p>
@@ -19,7 +19,7 @@
       <el-header class="app-header glass-header">
         <div class="header-left">
           <span class="header-logo">🎮</span>
-          <h1 class="header-title">游戏包名爬虫系统 <span class="version-tag">v3.0</span></h1>
+          <h1 class="header-title">游戏包名爬虫系统 <span class="version-tag">v3.4</span></h1>
         </div>
         <div class="header-right">
           <el-tooltip :content="store.darkMode ? '切换浅色模式' : '切换深色模式'" placement="bottom">

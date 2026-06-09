@@ -5,6 +5,8 @@
 
 from __future__ import annotations
 
+import asyncio as _asyncio
+import random as _random
 import re as _re
 from urllib.parse import urljoin
 
@@ -21,7 +23,11 @@ class ApkpureScraper(BaseScraper):
     name = "APKPure"
 
     async def fetch(self, package: str) -> ApkInfo:
-        """APKPure: 搜索页 (JS渲染) → 详情页 URL → 详情页提取版本."""
+        """APKPure: 搜索页 (JS渲染) → 详情页 URL → 详情页提取版本.
+
+        v3.3: 请求前随机延迟 0.5-2.0s, 降低单包名排查时的频率特征.
+        """
+        await _asyncio.sleep(_random.uniform(0.5, 2.0))
         search_url = f"https://apkpure.com/search?q={package}"
 
         # Step 1: Fetcher 获取搜索页

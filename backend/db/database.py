@@ -112,8 +112,13 @@ def init_db() -> None:
             conn.execute(f"ALTER TABLE daily_updates ADD COLUMN {col} {col_type}")
         except sqlite3.OperationalError:
             pass  # 列已存在, SQLite 不支持 IF NOT EXISTS
+    # v3.4: 先删旧的非唯一索引, 再建唯一索引 (支持 INSERT OR REPLACE 去重)
+    try:
+        conn.execute("DROP INDEX IF EXISTS idx_source_package")
+    except sqlite3.OperationalError:
+        pass
     conn.execute("""
-        CREATE INDEX IF NOT EXISTS idx_source_package
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_source_package
         ON daily_updates(source, package_name)
     """)
 

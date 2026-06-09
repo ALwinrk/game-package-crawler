@@ -70,11 +70,20 @@ def main():
         print(f"[错误] 无法切换工作目录: {app_dir} — {e}")
         sys.exit(1)
 
-    # EXE 模式: 首次运行复制预置 config.json, 指定 Chromium 路径
+    # EXE 模式: 首次运行复制预置 config.json + Chromium, 设置持久路径
     if getattr(sys, 'frozen', False):
         bundle_dir = get_bundle_dir()
         chromium_dir = bundle_dir / "chromium"
         if chromium_dir.exists():
+            # v3.3: 复制 Chromium 到持久目录, 避免从 Temp 目录运行被杀软拦截
+            local_chromium = app_dir / "chromium"
+            if not local_chromium.exists():
+                try:
+                    print("[启动] 首次运行, 复制 Chromium 到持久目录...")
+                    shutil.copytree(chromium_dir, local_chromium)
+                    print(f"[启动] Chromium 已复制: {local_chromium}")
+                except OSError as e:
+                    print(f"[警告] 复制 Chromium 失败: {e}, 将使用临时目录")
             os.environ['_CHROMIUM_CHECKED'] = '1'
 
         # 复制预置 config.json (如果目标位置不存在)
@@ -96,9 +105,20 @@ def main():
     host = "127.0.0.1"
     port = 8000
 
+    # 检查端口是否被占用
+    import socket as _socket
+    _sock = _socket.socket(_socket.AF_INET, _socket.SOCK_STREAM)
+    _in_use = _sock.connect_ex((host, port)) == 0
+    _sock.close()
+    if _in_use:
+        print(f"[警告] 端口 {port} 已被占用, 尝试终止旧进程...")
+        if sys.platform == "win32":
+            os.system(f'netstat -ano | findstr :{port} | findstr LISTENING')
+        # 不阻止启动, uvicorn 会报明确的端口占用错误
+
     # 后台打开浏览器
     def open_browser():
-        time.sleep(1.5)
+        time.sleep(2.0)
         webbrowser.open(f"http://{host}:{port}")
 
     threading.Thread(target=open_browser, daemon=True).start()
@@ -106,19 +126,36 @@ def main():
     # v3.0: 注册强制退出处理器
     _setup_exit_handler()
 
-    print(f"游戏包名爬虫系统 v3.0")
+    print(f"游戏包名爬虫系统 v3.4")
     print(f"启动服务: http://{host}:{port}")
+    print(f"工作目录: {os.getcwd()}")
     print("-" * 50)
 
-    uvicorn.run(
-        "backend.main:app",
-        host=host,
-        port=port,
-        log_level="info",
-        access_log=False,
-        timeout_graceful_shutdown=2,  # v3.0: 秒级优雅关闭
-    )
+    try:
+        uvicorn.run(
+            "backend.main:app",
+            host=host,
+            port=port,
+            log_level="info",
+            access_log=False,
+            timeout_graceful_shutdown=2,
+        )
+    except KeyboardInterrupt:
+        print("\n用户中断, 正在退出...")
+    except Exception as e:
+        print(f"\n[服务异常] {e}")
+        import traceback
+        traceback.print_exc()
+        print("\n按 Enter 键退出...")
+        input()
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as e:
+        print(f"\n[致命错误] {e}")
+        import traceback
+        traceback.print_exc()
+        print("\n按 Enter 键退出...")
+        input()

@@ -25,25 +25,45 @@ def get_chromium_executable() -> str | None:
     """定位 Chromium 浏览器可执行文件.
 
     优先级:
-    1. PyInstaller EXE 打包后 — 在 sys._MEIPASS/chromium/ 下找
-    2. 开发模式 — 在 LOCALAPPDATA/ms-playwright/ 下找
+    1. 环境变量 _CHROMIUM_DIR 指定的路径
+    2. PyInstaller EXE 打包后 — 优先 EXE 同目录/chromium/（持久, v3.3）
+    3. PyInstaller EXE 打包后 — 回退 sys._MEIPASS/chromium/（临时）
+    4. 开发模式 — 在 LOCALAPPDATA/ms-playwright/ 下找
 
     Returns:
         chrome-headless-shell.exe 或 chrome.exe 的路径, 找不到返回 None.
     """
+    candidates: list[str] = []
+
+    # 环境变量优先
+    env_dir = os.environ.get("_CHROMIUM_DIR", "")
+    if env_dir:
+        for name in ("chrome-headless-shell.exe", "chrome.exe"):
+            p = os.path.join(env_dir, name)
+            if os.path.isfile(p):
+                return p
+
     if getattr(sys, "frozen", False):
-        chromium_dir = os.path.join(sys._MEIPASS, "chromium")  # type: ignore[attr-defined]
-        candidates = [
-            os.path.join(chromium_dir, "chrome-headless-shell.exe"),
-            os.path.join(chromium_dir, "chrome.exe"),
-        ]
-        for exe in candidates:
-            if os.path.isfile(exe):
-                return exe
-        return None
-    else:
-        local_appdata = os.environ.get("LOCALAPPDATA", "")
-        ms_dir = os.path.join(local_appdata, "ms-playwright")
+        # v3.3: 优先从 EXE 同目录的持久 chromium/ 查找
+        exe_dir = os.path.dirname(sys.executable)
+        persistent_chromium = os.path.join(exe_dir, "chromium")
+        if os.path.isdir(persistent_chromium):
+            for name in ("chrome-headless-shell.exe", "chrome.exe"):
+                p = os.path.join(persistent_chromium, name)
+                if os.path.isfile(p):
+                    return p
+        # 回退到 PyInstaller 临时解压目录
+        temp_chromium = os.path.join(sys._MEIPASS, "chromium")  # type: ignore[attr-defined]
+        for name in ("chrome-headless-shell.exe", "chrome.exe"):
+            p = os.path.join(temp_chromium, name)
+            if os.path.isfile(p):
+                return p
+        # v3.4: 回退到服务器安装的 Playwright Chromium (LOCALAPPDATA/ms-playwright)
+
+    # 通用路径: ms-playwright (开发模式 + EXE 最终兜底)
+    local_appdata = os.environ.get("LOCALAPPDATA", "")
+    ms_dir = os.path.join(local_appdata, "ms-playwright")
+    if os.path.isdir(ms_dir):
         for root, dirs, files in os.walk(ms_dir):
             depth = root.replace(ms_dir, "").count(os.sep)
             if depth > 2:
@@ -51,7 +71,7 @@ def get_chromium_executable() -> str | None:
             for f in files:
                 if f in ("chrome-headless-shell.exe", "chrome.exe"):
                     return os.path.join(root, f)
-        return None
+    return None
 
 # ── Cloudflare 检测 ────────────────────────────────────────
 
@@ -89,6 +109,7 @@ def _get_proxy_dict() -> dict | None:
 # ── URL 安全验证 (SSRF 防护) ─────────────────────────────
 
 import ipaddress as _ipaddress
+import random as _random
 
 # 已知的 APK 源域名白名单
 _ALLOWED_DOMAINS: set[str] = {
@@ -172,6 +193,11 @@ def validate_url(url: str, allow_all_https: bool = False) -> str:
 
     return parsed.geturl()# ── Fetcher 后端 ────────────────────────────────────────────
 
+# TLS 指纹池 (v3.3: 随机轮换降低被 Cloudflare 关联封禁的概率)
+_FINGERPRINTS = [
+    "chrome110", "chrome116", "chrome120", "chrome124", "edge101",
+]
+
 _fetcher = None
 _fetcher_lock = threading.Lock()
 
@@ -202,7 +228,7 @@ def _http_get_sync(url: str) -> tuple[int, str]:
             timeout=int(settings.request_timeout),
             retries=0 if proxies_override is not None else settings.retry_times,
             retry_delay=settings.retry_delay,
-            impersonate="chrome124",
+            impersonate=_random.choice(_FINGERPRINTS),
             stealthy_headers=True,
             proxies=proxies_override if proxies_override is not None else proxies,
             headers={"Accept-Language": "zh-CN,zh;q=0.9"},

@@ -70,18 +70,33 @@ def _extract_slug_from_url(url: str) -> str:
         → pubg-mobile-for-android-2025
         https://apkcombo.com/pubg-mobile/com.tencent.ig/
         → pubg-mobile
+        https://apkcombo.com/zh/com.tencent.ig
+        → ""  (仅语言码+包名, 无 slug, 回退到包名直连)
+        https://apkcombo.com/en/game-slug/com.test.app
+        → game-slug  (三段 URL: 语言码/真slug/包名)
 
     API 格式 (如 /api/app/{pkg}) 无法提取 slug，返回空字符串。
     """
     url_clean = url.rstrip("/")
-    # 排除 API/非详情页路径
-    skip_segments = {"api", "search", "download"}
-    m = re.search(r'https?://[^/]+/([^/]+)/([^/]+)$', url_clean)
-    if m:
-        slug = m.group(1)
-        if slug.lower() in skip_segments:
-            return ""
-        return slug
+    skip_segments = {"api", "app", "search", "download"}
+    lang_codes = {"zh", "en", "fr", "de", "ja", "ko", "pt", "es", "ru", "ar",
+                  "vi", "th", "id", "tr", "it", "nl", "pl", "hi", "bn", "cn"}
+
+    # 提取域名后的所有路径段
+    m = re.search(r'https?://[^/]+/(.*)$', url_clean)
+    if not m:
+        return ""
+    parts = [p for p in m.group(1).split("/") if p]
+    if len(parts) < 2:
+        return ""
+
+    # 去掉包名段（最后一段）
+    *prefix, pkg = parts
+
+    # 去掉 API/语言码前缀，取最后一个作为 slug
+    for seg in reversed(prefix):
+        if seg.lower() not in skip_segments and seg.lower() not in lang_codes:
+            return seg
     return ""
 
 
@@ -173,6 +188,28 @@ async def extract_apkvision_links(detail_url: str) -> list[DownloadVariant]:
         seen_urls.add(url)
         variants.append(DownloadVariant(url=url, arch=detect_arch(f"{url} {label}"), source="APKVision"))
     return variants
+
+
+# ── 下载页 URL 生成 (v3.3: 前端"浏览器下载页"按钮) ──────
+
+def get_download_page_url(source: str, detail_url: str, package: str = "", version: str = "") -> str:
+    """根据来源生成浏览器下载页 URL（用户手动下载）."""
+    slug = _extract_slug_from_url(detail_url)
+    ver = version or "latest"
+    if source == "APKPure":
+        if slug:
+            return f"https://apkpure.com/cn/{slug}/{package}/download"
+        return f"https://apkpure.com/cn/{package}"
+    elif source == "APKCombo":
+        if slug:
+            return f"https://apkcombo.com/zh/{slug}/{package}/download/phone-{ver}-apk"
+        return f"https://apkcombo.com/zh/{package}/download"
+    elif source == "APKMirror":
+        return detail_url  # 详情页就是下载入口
+    elif source == "APKVision":
+        return detail_url  # 同上
+    else:
+        return detail_url
 
 
 # ── 源映射 ───────────────────────────────────────────────

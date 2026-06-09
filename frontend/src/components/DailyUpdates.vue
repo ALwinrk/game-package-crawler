@@ -7,8 +7,16 @@
             <span class="panel-title">📰 实时更新游戏</span>
             <span v-if="lastFetchedAt" class="fetched-time">数据更新于 {{ lastFetchedAt }}</span>
           </div>
-          <el-button size="small" :icon="Refresh" @click="refresh" :loading="loading" round>
-            手动刷新
+          <el-button size="small" @click="refreshPanel" :loading="loadingPanel" round>
+            🔄 刷新面板
+          </el-button>
+          <el-button size="small" :icon="Refresh" @click="refreshIncremental"
+            :loading="loadingIncr" round>
+            增量刷新
+          </el-button>
+          <el-button size="small" type="primary" :icon="Refresh" @click="refreshFull"
+            :loading="loadingFull" round>
+            全量刷新
           </el-button>
         </div>
       </template>
@@ -315,22 +323,64 @@ function resetPollTimer(ms: number): void {
   pollTimer = window.setInterval(() => fetchUpdates(), ms)
 }
 
-async function refresh(): Promise<void> {
-  loading.value = true
+const loadingIncr = ref(false)
+const loadingFull = ref(false)
+const loadingPanel = ref(false)
+
+/** 刷新面板 — 仅从数据库拉取最新数据, 不触发爬取 */
+async function refreshPanel(): Promise<void> {
+  loadingPanel.value = true
   try {
-    const resp = await fetch(`${store.apiBase}/api/daily-updates/refresh`, { method: 'POST' })
+    await fetchUpdates(true)
+    ElMessage.success('面板已刷新')
+  } catch {
+    // silent
+  } finally {
+    loadingPanel.value = false
+  }
+}
+
+/** 增量刷新 — 只抓首页新数据, 快且安全 */
+async function refreshIncremental(): Promise<void> {
+  loadingIncr.value = true
+  try {
+    const resp = await fetch(`${store.apiBase}/api/daily-updates/refresh-incremental`, { method: 'POST' })
     const result = await resp.json()
     if (result.status === 'ok') {
-      ElMessage.success('刷新完成')
+      ElMessage.success('增量刷新完成')
     } else {
-      ElMessage.warning('刷新超时，稍后自动更新')
+      ElMessage.warning('增量刷新超时，稍后自动更新')
     }
     await fetchUpdates(true)
   } catch {
     fetchUpdates(true)
   } finally {
-    loading.value = false
+    loadingIncr.value = false
   }
+}
+
+/** 全量刷新 — 重新抓取所有页面, 数据最全但请求量大 */
+async function refreshFull(): Promise<void> {
+  loadingFull.value = true
+  try {
+    const resp = await fetch(`${store.apiBase}/api/daily-updates/refresh`, { method: 'POST' })
+    const result = await resp.json()
+    if (result.status === 'ok') {
+      ElMessage.success('全量刷新完成')
+    } else {
+      ElMessage.warning('全量刷新超时，稍后自动更新')
+    }
+    await fetchUpdates(true)
+  } catch {
+    fetchUpdates(true)
+  } finally {
+    loadingFull.value = false
+  }
+}
+
+// 兼容旧调用
+async function refresh(): Promise<void> {
+  await refreshFull()
 }
 
 onMounted(async () => {

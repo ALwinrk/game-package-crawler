@@ -191,9 +191,11 @@ export const useAppStore = defineStore('app', () => {
           mode: 'fast',
         }),
       })
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
       const data = await resp.json()
       results.value = (data.results || []) as FetchResult[]
     } catch (e: any) {
+      console.error('[batchFetch]', e)
       results.value = []
     } finally {
       loading.value = false
@@ -206,7 +208,7 @@ export const useAppStore = defineStore('app', () => {
       const resp = await fetch(`${apiBase.value}/api/memo/${packageName}`)
       const data = await resp.json()
       if (data.found) return data.data
-    } catch { }
+    } catch (e) { console.error('[checkMemo]', e) }
     return null
   }
 
@@ -218,7 +220,7 @@ export const useAppStore = defineStore('app', () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ package: pkg, version_code: vc, version_name: vn }),
       })
-    } catch { }
+    } catch (e) { console.error('[saveMemo]', e) }
   }
 
   // 提交下载
@@ -229,7 +231,7 @@ export const useAppStore = defineStore('app', () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ url, package: pkg, version, arch, detail_url: detailUrl }),
       })
-    } catch { }
+    } catch (e) { console.error('[submitDownload]', e) }
   }
 
   // 刷新下载列表
@@ -238,7 +240,7 @@ export const useAppStore = defineStore('app', () => {
       const resp = await fetch(`${apiBase.value}/api/download/tasks`)
       const data = await resp.json()
       downloadTasks.value = data.tasks || []
-    } catch { }
+    } catch (e) { console.error('[refreshDownloads]', e) }
   }
 
   // 获取下载直链
@@ -250,7 +252,8 @@ export const useAppStore = defineStore('app', () => {
         body: JSON.stringify({ source, detail_url: detailUrl, package: pkg, version }),
       })
       return await resp.json()
-    } catch {
+    } catch (e) {
+      console.error('[extractLinks]', e)
       return null
     }
   }

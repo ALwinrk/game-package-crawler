@@ -83,37 +83,57 @@
             <el-tag v-else type="success" size="small" effect="plain" round>✅ OK</el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="180" fixed="right">
+        <el-table-column label="操作" width="240" fixed="right">
           <template #default="{ row }">
-            <el-button
+            <!-- 按钮 1: 中文站详情页 -->
+            <el-tooltip
               v-if="row.detail_url"
-              size="small"
-              type="primary"
-              link
-              @click="openDetailUrl(row.detail_url, row.source)"
+              :content="'打开 ' + row.source + ' 中文详情页'"
+              placement="top"
             >
-              🌐 详情页
-            </el-button>
-            <el-button
-              v-if="row.version && !row.download_urls.length"
-              size="small"
-              type="success"
-              :icon="Download"
-              :loading="row._extracting"
-              @click="extractAndDownload(row)"
+              <el-button
+                size="small"
+                type="primary"
+                link
+                @click="openDetailUrl(row.detail_url, row.source)"
+              >
+                🌐 详情页
+              </el-button>
+            </el-tooltip>
+
+            <!-- 按钮 2: 浏览器自主下载（打开下载页） -->
+            <el-tooltip
+              v-if="row.version && !row.error"
+              content="在浏览器中打开下载页面，手动下载"
+              placement="top"
             >
-              获取链接
-            </el-button>
-            <el-button
-              v-for="(durl, i) in row.download_urls"
-              :key="'dl-'+i"
-              size="small"
-              type="warning"
-              :icon="VideoPlay"
-              @click="openDetailUrl(durl, row.source)"
+              <el-button
+                size="small"
+                type="warning"
+                link
+                :icon="VideoPlay"
+                @click="openDownloadPage(row)"
+              >
+                浏览器下载
+              </el-button>
+            </el-tooltip>
+
+            <!-- 按钮 3: 系统自动下载 -->
+            <el-tooltip
+              v-if="row.version && !row.error"
+              content="系统自动提取链接并下载，无需手动操作"
+              placement="top"
             >
-              浏览器下载
-            </el-button>
+              <el-button
+                size="small"
+                type="success"
+                :icon="Download"
+                :loading="row._extracting"
+                @click="extractAndDownload(row)"
+              >
+                点击下载
+              </el-button>
+            </el-tooltip>
           </template>
         </el-table-column>
       </el-table>
@@ -181,23 +201,38 @@ function openDetailUrl(url: string, source: string) {
   window.open(finalUrl, '_blank')
 }
 
+/** v3.3: 打开浏览器下载页 — 调用后端 API 获取正确的下载页 URL */
+async function openDownloadPage(row: RowData) {
+  try {
+    const data = await store.extractLinks(row.source, row.detail_url!, row.package, row.version || '')
+    const dlUrl = data?.download_page_url || data?.best?.url
+    if (dlUrl) {
+      window.open(dlUrl, '_blank')
+      ElMessage.success({ message: '已打开下载页，请在浏览器中手动下载', customClass: 'cyber-msg' })
+    } else {
+      // 回退：直接用详情页
+      openDetailUrl(row.detail_url!, row.source)
+      ElMessage.info({ message: '未找到下载页，已打开详情页', customClass: 'cyber-msg' })
+    }
+  } catch (e: any) {
+    ElMessage.error({ message: '获取下载页失败', customClass: 'cyber-msg' })
+  }
+}
+
+/** v3.3: 系统自动下载 — 提取链接 → 提交下载 → Playwright/aiohttp */
 async function extractAndDownload(row: RowData) {
   row._extracting = true
   try {
     const data = await store.extractLinks(row.source, row.detail_url!, row.package, row.version || '')
-    if (data?.best) {
-      row.download_urls = [data.best.url]
-      if (data.best.arch) row.abis = [data.best.arch]
-      await store.submitDownload(data.best.url, row.package, row.version || 'latest', data.best.arch || 'unknown', row.detail_url || '')
-      ElMessage.success({ message: `📥 已提交下载: ${data.best.arch}`, customClass: 'cyber-msg' })
-    } else if (data?.variants?.length) {
-      row.download_urls = data.variants.map((v: any) => v.url)
-      ElMessage.info({ message: `找到 ${data.variants.length} 个变体，请选择`, customClass: 'cyber-msg' })
+    const dlUrl = data?.best?.url
+    if (dlUrl) {
+      await store.submitDownload(dlUrl, row.package, row.version || 'latest', data.best.arch || 'unknown', row.detail_url || '')
+      ElMessage.success({ message: `📥 已提交下载: ${data.best.arch || '自动'}`, customClass: 'cyber-msg' })
     } else {
-      ElMessage.warning({ message: '哎呀，没找到下载链接，可能被防盗链截胡了~', customClass: 'cyber-msg' })
+      ElMessage.warning({ message: '哎呀，没找到下载链接，请尝试"浏览器下载"手动操作~', customClass: 'cyber-msg' })
     }
   } catch (e: any) {
-    ElMessage.error({ message: `提取失败: ${e.message}`, customClass: 'cyber-msg' })
+    ElMessage.error({ message: `下载失败: ${e.message}`, customClass: 'cyber-msg' })
   } finally {
     row._extracting = false
   }

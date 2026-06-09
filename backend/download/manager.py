@@ -128,7 +128,12 @@ class DownloadManager:
                     logger.warning("下载失败（已达最大重试）: {} — {}", task.package_name, e)
 
     async def _do_download(self, task: DownloadTask, attempt: int):
-        """单次下载尝试."""
+        """单次下载尝试.
+
+        v3.3: 检测 HTML 页面下载, 自动降级到 Playwright 浏览器下载.
+        APKCombo/APKPure 的下载链接指向浏览器下载页, 非直链,
+        aiohttp 只能拿到 HTML 页面, 必须走 Playwright 触发真实下载.
+        """
         task.status = "downloading"
         self._save_task(task)
 
@@ -137,6 +142,21 @@ class DownloadManager:
         if part_path.exists():
             task.downloaded_size = part_path.stat().st_size
             headers["Range"] = f"bytes={task.downloaded_size}-"
+
+        # v3.3: APKCombo/APKPure 下载页 → 直接走 Playwright, 跳过 aiohttp+HEAD
+        _is_browser_page = any(
+            domain in task.url.lower()
+            for domain in ("apkcombo.com/", "apkpure.com/", "apkpure.net/")
+        )
+        _is_browser_page = _is_browser_page and "/download" in task.url.lower()
+
+        # v3.3: 浏览器下载页 → 跳过 HEAD+aiohttp, 直接 Playwright
+        if _is_browser_page:
+            logger.info("浏览器下载页, 直接 Playwright: {}", task.package_name)
+            await self._browser_download(task, part_path)
+            if task.status == "error":
+                raise Exception(task.error or "浏览器下载失败")
+            return
 
         # HEAD 预检 (首次尝试时)
         if attempt == 1 and not headers.get("Range"):
@@ -166,6 +186,18 @@ class DownloadManager:
                 raise Exception(f"HTTP {resp.status}")
 
             content_length = resp.headers.get("Content-Length")
+            content_type = resp.headers.get("Content-Type", "")
+
+            # 防御: 如果 URL 是浏览器页但上面漏过了, Content-Type HTML → Playwright
+            if "text/html" in content_type:
+                logger.info("HTML 响应, 切换 Playwright: {}", task.package_name)
+                if part_path.exists():
+                    part_path.unlink()
+                await self._browser_download(task, part_path)
+                if task.status == "error":
+                    raise Exception(task.error or "浏览器下载失败")
+                return
+
             if content_length:
                 task.total_size = task.downloaded_size + int(content_length)
 
@@ -220,16 +252,19 @@ class DownloadManager:
         logger.info("下载完成: {} → {} (arch={})", task.package_name, task.save_path, task.arch)
 
     async def _browser_download(self, task: DownloadTask, part_path: Path):
-        """APKPure/APKCombo 防盗链下载（设计文档 5.1.6）.
+        """APKPure/APKCombo 防盗链下载.
 
-        策略：这些站点的下载链接有严格的防盗链（Referer/Cookie/JS 生成），
-        aiohttp 直接请求会返回 403 或 HTML 页面。使用 Playwright 的 download
-        事件来捕获真实下载 — 浏览器上下文能通过所有验证。
+        v3.3 重写: 三阶段策略
+        1. 监听 Playwright 下载事件 (页面自动触发)
+        2. 点击下载按钮触发
+        3. 从页面提取真实 APK URL, 回传给 aiohttp 下载
         """
         import threading as _thr
+        import re as _re
         done_queue: queue.Queue = queue.Queue()
 
-        is_apkpure = "apkpure" in task.url.lower()
+        _is_apkcombo = "apkcombo" in task.url.lower()
+        _is_apkpure = "apkpure" in task.url.lower()
 
         def _browser_worker():
             try:
@@ -256,77 +291,191 @@ class DownloadManager:
                     )
                     page = context.new_page()
 
-                    # 监听 download 事件
-                    download_completed = {"done": False, "path": "", "error": ""}
+                    download_result = {"done": False, "path": "", "error": "", "arch": ""}
+                    direct_urls: list[str] = []
 
+                    # 监听 download 事件 (页面自动触发、或 JS 脚本触发)
                     def _on_download(download):
                         try:
                             suggested = download.suggested_filename
-                            # 从文件名识别架构
                             arch = DownloadManager._detect_arch("", suggested)
-                            if arch != "unknown":
-                                download_completed["arch"] = arch
+                            download_result["arch"] = arch
                             save_as = str(Path(task.save_path).parent / suggested)
                             download.save_as(save_as)
-                            download_completed["done"] = True
-                            download_completed["path"] = save_as
+                            download_result["done"] = True
+                            download_result["path"] = save_as
                         except Exception as e:
-                            download_completed["error"] = str(e)
+                            download_result["error"] = str(e)
+
+                    # 拦截网络请求, 只捕获真正的 APK 下载链接
+                    def _on_response(response):
+                        url = response.url.lower()
+                        # v3.3: 必须含 /.apk (路径中的 .apk 文件), 排除域名中的 apk
+                        if response.ok and ".apk" in url:
+                            if not ("/.apk" in url or url.endswith(".apk")):
+                                return  # apkpure.com / apkcombo.com 域名 - 跳过
+                            # 排除图片和资源 CDN
+                            _skip_domains = ("imgrs.", "static.", "images.", "cdn.", "lh3.googleusercontent")
+                            if any(sd in url for sd in _skip_domains):
+                                return
+                            direct_urls.append(response.url)
 
                     page.on("download", _on_download)
+                    page.on("response", _on_response)
 
                     try:
-                        if is_apkpure and task.detail_url:
-                            # 先去详情页建立 cookie 上下文
-                            page.goto(task.detail_url, wait_until="domcontentloaded", timeout=20000)
+                        # Step 1: 建立 cookie 上下文 (APKPure)
+                        if _is_apkpure and task.detail_url:
+                            page.goto(task.detail_url, wait_until="domcontentloaded", timeout=15000)
                             page.wait_for_timeout(2000)
 
-                        # 尝试直接访问下载 URL（此时已有 cookie 上下文）
-                        page.goto(task.url, wait_until="domcontentloaded", timeout=30000)
+                        # Step 2: 导航到下载页 (domcontentloaded 足够, networkidle 易超时)
+                        page.goto(task.url, wait_until="domcontentloaded", timeout=25000)
                         page.wait_for_timeout(3000)
 
-                        # 如果还没触发下载，点击页面中的下载按钮
-                        if not download_completed["done"]:
-                            for sel in [
-                                'a[href*="download"]', 'a:has-text("Download")',
-                                '.download-btn', '#download_link', 'a[data-dt-apkid]',
-                                'button:has-text("Download")',
-                            ]:
+                        # Step 3: 如果下载未自动触发, 用 JS 查找并点击下载按钮
+                        if not download_result["done"]:
+                            # 策略A: CSS 选择器
+                            click_selectors = [
+                                'a[href$=".apk"]', 'a[href*="download/apk"]',
+                                'a:has-text("Download APK")', 'a:has-text("Download")',
+                                'button:has-text("Download")', 'button:has-text("下载")',
+                                '.download-btn', '#download_link', '.btn-download',
+                                'a[data-dt-apkid]', '.download-start-btn',
+                                '[data-action="download"]', '[onclick*="download"]',
+                            ]
+                            for sel in click_selectors:
                                 try:
                                     btn = page.locator(sel).first
-                                    if btn.is_visible(timeout=1000):
+                                    if btn.is_visible(timeout=600):
                                         btn.click()
-                                        page.wait_for_timeout(5000)
-                                        if download_completed["done"]:
+                                        page.wait_for_timeout(3500)
+                                        if download_result["done"]:
+                                            logger.info("CSS 触发下载: {}", sel)
                                             break
                                 except Exception:
                                     continue
 
-                        # 等待下载
-                        page.wait_for_timeout(8000)
+                        # Step 3b: JS 暴力查找并点击所有可能的下载链接
+                        if not download_result["done"]:
+                            logger.info("CSS 未命中, 尝试 JS 暴力点击...")
+                            clicked_js = page.evaluate("""() => {
+                                const clicked = [];
+                                const all = document.querySelectorAll('a, button, [onclick]');
+                                for (const el of all) {
+                                    const text = (el.textContent || '').toLowerCase();
+                                    const href = (el.href || el.getAttribute('onclick') || '').toLowerCase();
+                                    if (text.includes('download') || text.includes('apk') ||
+                                        text.includes('下载') || href.includes('.apk') ||
+                                        href.includes('download')) {
+                                        try { el.click(); clicked.push(el.tagName + ':' + text.substring(0,30)); } catch(e) {}
+                                    }
+                                }
+                                return clicked;
+                            }""")
+                            logger.info("JS 点击了 {} 个元素: {}", len(clicked_js), str(clicked_js)[:200])
+                            page.wait_for_timeout(5000)
+
+                        # Step 4: 等待下载完成
+                        page.wait_for_timeout(5000)
 
                     except Exception as e:
                         logger.warning("浏览器导航异常: {}", e)
                     finally:
+                        # 在关闭浏览器前扫描页面获取直链
+                        if not download_result["done"] and not direct_urls:
+                            try:
+                                html = page.content()
+                                # 匹配 APK 直链
+                                extra = _re.findall(r'https?://[^\s"\']+\.apk[^\s"\']*', html)
+                                direct_urls.extend(extra)
+                                # 匹配 download 链接
+                                dl_links = _re.findall(r'https?://[^\s"\']+/download/[^\s"\']+', html)
+                                for dl in dl_links:
+                                    if dl not in direct_urls:
+                                        direct_urls.append(dl)
+                            except Exception:
+                                pass
                         browser.close()
 
-                    if download_completed["done"]:
-                        apk_path = download_completed["path"]
+                    # ── 结果处理 ──
+                    if download_result["done"]:
+                        apk_path = download_result["path"]
                         size = os.path.getsize(apk_path) if os.path.exists(apk_path) else 0
-                        if size > 50000:  # 至少 50KB
-                            # 移动到目标路径
+                        if size > 50000:
                             final_path = Path(task.save_path)
                             os.makedirs(final_path.parent, exist_ok=True)
                             if final_path.exists():
                                 final_path.unlink()
                             os.rename(apk_path, str(final_path))
-                            done_queue.put(("completed", size))
+                            done_queue.put(("completed", {
+                                "size": size,
+                                "arch": download_result.get("arch", ""),
+                            }))
                         else:
                             done_queue.put(("error", f"下载文件过小 ({size} bytes)，非 APK"))
-                    elif download_completed["error"]:
-                        done_queue.put(("error", download_completed["error"]))
+                    elif direct_urls:
+                        # v3.3: 严格过滤 — 必须是路径中的 .apk 文件 (排除域名中的 apkpure/apkcombo)
+                        apk_urls = []
+                        for u in direct_urls:
+                            lower = u.lower()
+                            if "/.apk" not in lower and not lower.split("?")[0].endswith(".apk"):
+                                continue  # 跳过域名含 apk 的 URL (如 m.apkpure.com)
+                            if any(lower.endswith(ext) for ext in (".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".ico")):
+                                continue
+                            if "/rs:fit:" in lower or "/imgs/" in lower or "no_login" in lower:
+                                continue
+                            apk_urls.append(u)
+                        if apk_urls:
+                            # v3.3: 用 Playwright 导航到 APK 直链, 通过浏览器上下文触发下载
+                            best = None
+                            for u in apk_urls:
+                                if ".apk" in u.lower():
+                                    best = u; break
+                            if not best:
+                                best = apk_urls[0]
+                            logger.info("Playwright JS 触发下载: {} (过滤{}/{})", best[:100], len(direct_urls), len(apk_urls))
+                            try:
+                                # v3.3: 用 JS 在页面内创建隐藏链接并点击, 保留 Referer
+                                page.evaluate(f"""
+                                    (() => {{
+                                        const a = document.createElement('a');
+                                        a.href = '{best}';
+                                        a.download = '';
+                                        a.style.display = 'none';
+                                        document.body.appendChild(a);
+                                        a.click();
+                                        setTimeout(() => document.body.removeChild(a), 100);
+                                    }})()
+                                """)
+                                page.wait_for_timeout(10000)
+                                if download_result["done"]:
+                                    apk_path = download_result["path"]
+                                    size = os.path.getsize(apk_path) if os.path.exists(apk_path) else 0
+                                    if size > 50000:
+                                        final_path = Path(task.save_path)
+                                        os.makedirs(final_path.parent, exist_ok=True)
+                                        if final_path.exists():
+                                            final_path.unlink()
+                                        os.rename(apk_path, str(final_path))
+                                        done_queue.put(("completed", {"size": size, "arch": download_result.get("arch", "")}))
+                                    else:
+                                        done_queue.put(("error", f"下载文件过小 ({size} bytes)，非 APK"))
+                                else:
+                                    logger.info("JS 触发下载未响应, 回退 aiohttp: {}", best[:100])
+                                    done_queue.put(("direct_url", {"url": best, "arch": ""}))
+                            except Exception as e:
+                                logger.warning("JS 下载失败: {} — {}", best[:100], e)
+                                done_queue.put(("direct_url", {"url": best, "arch": ""}))
+                        else:
+                            done_queue.put(("error", f"未找到有效APK直链 (拦截到{len(direct_urls)}个资源但非APK)"))
+                        done_queue.put(("direct_url", {"url": best, "arch": ""}))
+                    elif download_result["error"]:
+                        done_queue.put(("error", download_result["error"]))
                     else:
-                        done_queue.put(("error", "未触发下载事件，请手动在浏览器中打开下载链接"))
+                        done_queue.put(("error", "未触发下载事件且未找到直链，请手动访问下载页"))
+                    _on_download = None
+                    _on_response = None
 
             except ImportError:
                 done_queue.put(("error", "patchright 未安装"))
@@ -347,15 +496,18 @@ class DownloadManager:
             return
 
         if status == "completed":
-            task.downloaded_size = data if isinstance(data, int) else 0
+            if isinstance(data, dict):
+                task.downloaded_size = data.get("size", 0)
+                detected = data.get("arch", "")
+            else:
+                task.downloaded_size = data if isinstance(data, int) else 0
+                detected = ""
             task.progress_pct = 100.0
             task.total_size = task.downloaded_size
-            # 从文件名识别架构
-            detected = download_completed.get("arch", "")
             if detected and task.arch == "unknown":
                 task.arch = detected
                 task.abi_source = "filename"
-            if part_path.exists():
+            if part_path.exists() and part_path != Path(task.save_path):
                 final_path = Path(task.save_path)
                 if final_path.exists():
                     final_path.unlink()
@@ -365,6 +517,42 @@ class DownloadManager:
             self._save_task(task)
             await self._notify_progress(task)
             logger.info("浏览器下载完成: {} ({} bytes, arch={})", task.package_name, task.downloaded_size, task.arch)
+
+        elif status == "direct_url":
+            # v3.3: 从页面提取了直链 → 用 aiohttp 下载
+            direct_url = data.get("url", "") if isinstance(data, dict) else str(data)
+            logger.info("使用页面提取的直链下载: {}", direct_url[:100])
+            try:
+                # 用 aiohttp 下载直链
+                async with self._session.get(
+                    direct_url,
+                    proxy=getattr(get_settings(), "proxy", None) or None,
+                    timeout=aiohttp.ClientTimeout(total=600),
+                ) as resp:
+                    if resp.status not in (200, 206):
+                        raise Exception(f"直链 HTTP {resp.status}")
+                    os.makedirs(os.path.dirname(task.save_path), exist_ok=True)
+                    total = 0
+                    mode = "wb"
+                    chunk_size = 1024 * 1024
+                    with open(task.save_path, mode) as f:
+                        async for chunk in resp.content.iter_chunked(chunk_size):
+                            f.write(chunk)
+                            total += len(chunk)
+                    task.downloaded_size = total
+                    task.total_size = total
+                    task.progress_pct = 100.0
+                    task.status = "completed"
+                    task.speed = ""
+                    self._save_task(task)
+                    await self._notify_progress(task)
+                    logger.info("直链下载完成: {} ({} bytes)", task.package_name, total)
+            except Exception as e:
+                task.status = "error"
+                task.error = f"直链下载失败: {e}"[:100]
+                self._save_task(task)
+                await self._notify_progress(task)
+                logger.warning("直链下载失败: {} — {}", task.package_name, e)
         else:
             task.status = "error"
             task.error = str(data)

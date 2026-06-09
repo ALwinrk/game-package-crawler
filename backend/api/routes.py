@@ -629,7 +629,18 @@ async def daily_updates(
             if client_time >= last_mod:
                 return Response(status_code=304)
         except (ValueError, TypeError, LookupError):
-            pass  # 客户端时间格式无效，继续返回数据
+            pass
+
+    settings = get_settings()
+
+    # v3.4: 每个源使用独立的展示上限
+    _display_limits = {
+        "apkpure": getattr(settings, "apkpure_display_limit", 90),
+        "apkcombo": getattr(settings, "apkcombo_display_limit", 90),
+        "apkcombo_trending": getattr(settings, "apkcombo_display_limit", 90),
+        "apkvision_updated": getattr(settings, "apkvision_display_limit", 60),
+        "apkvision_new": getattr(settings, "apkvision_display_limit", 60),
+    }
 
     conn = _get_conn()
     try:
@@ -637,13 +648,14 @@ async def daily_updates(
         for src in ("apkpure", "apkcombo", "apkcombo_trending", "apkvision_updated", "apkvision_new"):
             if source and source != src:
                 continue
+            src_limit = _display_limits.get(src, limit)
             sql = (
                 "SELECT app_name, icon_url, detail_url, package_name, "
                 "download_count, version_name, updated_at "
                 "FROM daily_updates WHERE source = ? "
                 "ORDER BY updated_at DESC LIMIT ?"
             )
-            rows = conn.execute(sql, (src, limit)).fetchall()
+            rows = conn.execute(sql, (src, src_limit)).fetchall()
             result[src] = [
                 {
                     "app_name": r["app_name"],
@@ -659,7 +671,6 @@ async def daily_updates(
     finally:
         conn.close()
 
-    settings = get_settings()
     result["poll_interval"] = getattr(settings, "frontend_poll_interval", 300)
     if last_mod:
         result["last_fetched_at"] = last_mod.strftime("%Y-%m-%d %H:%M:%S")
@@ -672,13 +683,45 @@ async def daily_updates(
 
 @router.post("/daily-updates/refresh")
 async def trigger_daily_refresh():
-    """手动触发每日更新抓取 (等待完成, 最多 45s)."""
+    """全量刷新 — 重新抓取所有数据源的全部页面（最多 45s)."""
     from backend.cron.update_tracker import update_once
     try:
-        await asyncio.wait_for(update_once(), timeout=45.0)
-        return {"status": "ok", "message": "刷新完成"}
+        await asyncio.wait_for(update_once(full_refresh=True), timeout=45.0)
+        return {"status": "ok", "message": "全量刷新完成"}
     except asyncio.TimeoutError:
         return {"status": "timeout", "message": "刷新超时，后台继续"}
+
+
+@router.post("/daily-updates/refresh-incremental")
+async def trigger_incremental_refresh():
+    """v3.4 增量刷新 — 只抓首页新数据, 速度快且不易被封（最多 30s)."""
+    from backend.cron.update_tracker import update_once
+    try:
+        await asyncio.wait_for(update_once(full_refresh=False), timeout=30.0)
+        return {"status": "ok", "message": "增量刷新完成"}
+    except asyncio.TimeoutError:
+        return {"status": "timeout", "message": "增量刷新超时，后台继续"}
+
+
+@router.post("/apkpure/unblock")
+async def apkpure_unblock(request: Request):
+    """v3.3: 手动重置 APKPure 熔断器 (仅允许本地访问).
+
+    APKPure 被封后, 管理员手动换 IP 或等待解封后调用此接口,
+    重置熔断器 + 恢复默认更新间隔.
+    """
+    if request.client and request.client.host != "127.0.0.1":
+        raise HTTPException(403, "仅允许本地访问")
+    from backend.cron.update_tracker import record_success as _reset
+    await _reset("apkpure")
+    # 同时恢复默认更新间隔
+    settings = get_settings()
+    try:
+        settings.update({"update_check_interval": 1800})
+    except ValueError:
+        pass
+    logger.info("APKPure 熔断器已被管理员手动重置")
+    return {"ok": True, "message": "APKPure 熔断器已重置，更新间隔已恢复为 1800s"}
 
 
 # ── WebSocket ──────────────────────────────────────────────
@@ -750,8 +793,10 @@ async def extract_links(request: Request, data: dict[str, Any]):
     except ValueError as e:
         raise HTTPException(400, f"URL 无效: {e}")
 
+    from backend.download.extractors import get_download_page_url
     variants = await extract_download_links(source, detail_url, package=package, version=version)
     best = pick_best_variant(variants)
+    download_page_url = get_download_page_url(source, detail_url, package, version)
 
     return {
         "variants": [
@@ -759,4 +804,5 @@ async def extract_links(request: Request, data: dict[str, Any]):
             for v in variants
         ],
         "best": {"url": best.url, "arch": best.arch, "source": best.source} if best else None,
+        "download_page_url": download_page_url,
     }
