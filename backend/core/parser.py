@@ -42,7 +42,7 @@ def extract_version(html: str) -> str | None:
     for attr in _ATTR_CANDIDATES:
         for elem in soup.find_all(attrs={attr: True}):
             v = elem[attr].strip()
-            if re.match(r'^[\d]+\.[\d]+', v) and len(v) < 25:
+            if re.match(r'^\d+\.\d+', v) and len(v) < 25:
                 return v
 
     # 策略 3：Schema.org itemprop
@@ -102,6 +102,16 @@ def extract_version_code(html: str, package: str = "") -> str | None:
 
     # 模式 2：x.y.z (NNNNNN)（版本号后括号跟 code）
     for m in re.finditer(r'(\d+\.\d+\.\d+)\s*[\(（]\s*(\d{3,12})\s*[\)）]', html):
+        return m.group(2)
+
+    # 模式 2b：x.y.z <tag>(NNNN)</tag> — APKCombo blur span 格式
+    m = re.search(r'(\d+\.\d+\.\d+)\s*(?:<[^>]+>\s*)?[\(（]\s*(\d{3,12})\s*[\)）]', html)
+    if m:
+        return m.group(2)
+
+    # 模式 2c：x.y.z (NNNN) 但括号和 code 间可能有任意 HTML — 先 strip tags 再试
+    clean = re.sub(r'<[^>]+>', ' ', html)
+    for m in re.finditer(r'(\d+\.\d+\.\d+)\s*[\(（]\s*(\d{3,12})\s*[\)）]', clean):
         return m.group(2)
 
     # 模式 3a：data-dt-versioncode="NNNNNN"（APKPure 搜索页，注意这是连写无下划线）

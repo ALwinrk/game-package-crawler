@@ -33,7 +33,14 @@
           </div>
           <div class="dl-card-meta">
             <span>版本: <b>{{ task.version }}</b></span>
-            <span>架构: <b>{{ task.arch || 'unknown' }}</b></span>
+            <span>架构:
+              <el-tag
+                :type="archTagType(task.arch)"
+                size="small"
+                effect="plain"
+                disable-transitions
+              >{{ task.arch || 'unknown' }}</el-tag>
+            </span>
           </div>
           <el-progress
             :percentage="task.progress_pct"
@@ -49,6 +56,14 @@
             <span v-else-if="task.status === 'completed'" class="dl-done">✅ 下载完成</span>
             <span v-else-if="task.error" class="dl-err">😵 {{ task.error }}</span>
             <div class="dl-actions">
+              <el-button
+                v-if="task.status === 'paused'"
+                size="small"
+                type="primary"
+                :icon="VideoPlay"
+                @click="resumeTask(task.id)"
+                round
+              >恢复</el-button>
               <el-button
                 v-if="task.status === 'downloading'"
                 size="small"
@@ -75,7 +90,7 @@
 
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted } from 'vue'
-import { Refresh, VideoPause, Delete } from '@element-plus/icons-vue'
+import { Refresh, VideoPause, VideoPlay, Delete } from '@element-plus/icons-vue'
 import { useAppStore } from '../stores/app'
 
 const store = useAppStore()
@@ -90,6 +105,10 @@ async function refresh() {
 
 function pauseTask(id: string) {
   fetch(`${store.apiBase}/api/download/${id}/pause`, { method: 'POST' })
+}
+
+function resumeTask(id: string) {
+  fetch(`${store.apiBase}/api/download/${id}/resume`, { method: 'POST' })
 }
 
 function cancelTask(id: string) {
@@ -110,6 +129,15 @@ function statusType(s: string): string {
     completed: 'success', error: 'danger', cancelled: 'info',
   }
   return map[s] || 'info'
+}
+
+function archTagType(arch: string): string {
+  if (!arch || arch === 'unknown') return 'info'
+  if (arch.startsWith('arm64')) return 'success'
+  if (arch.startsWith('armeabi') || arch.startsWith('armv7')) return ''
+  if (arch === 'universal') return 'warning'
+  if (arch.startsWith('x86')) return 'danger'
+  return 'info'
 }
 
 function formatSize(bytes: number): string {

@@ -1,4 +1,4 @@
-"""FastAPI 主应用 — 入口、生命周期、中间件 + 快速启动/关闭 (v2.8)."""
+"""FastAPI 主应用 — 入口、生命周期、中间件 + 快速启动/关闭 (v3.0)."""
 
 from __future__ import annotations
 
@@ -10,23 +10,26 @@ import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
 
 from backend.api.routes import router
 from backend.config import get_settings
 from backend.db.database import init_db, close_db
-from backend.download.manager import get_download_manager, DownloadManager
+from backend.download.manager import get_download_manager
 from backend.logging_setup import setup_logging, get_logger
 
 
-# ── 浏览器就绪事件 (v2.8: 后台初始化, 不阻塞服务启动) ────
+# ── 浏览器就绪事件 (v3.0: 后台初始化, 不阻塞服务启动) ────
 browser_ready = asyncio.Event()
 
 
-# ── 强制退出 (v2.8: 秒级关闭) ──────────────────────────
+# ── 强制退出 (v3.0: 秒级关闭) ──────────────────────────
 
 _force_exit = False
 
@@ -36,7 +39,7 @@ def _do_force_exit():
         return
     _force_exit = True
     try:
-        print("[v2.8] 收到退出信号，强制关闭...")
+        print("[v3.0] 收到退出信号，强制关闭...")
         loop = asyncio.get_running_loop()
         tasks = [t for t in asyncio.all_tasks(loop) if t is not asyncio.current_task()]
         for task in tasks:
@@ -65,7 +68,7 @@ def setup_console_handler():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """FastAPI 生命周期管理 (v2.8: 后台初始化 + 快速关闭)."""
+    """FastAPI 生命周期管理 (v3.0: 后台初始化 + 快速关闭)."""
     # 启动
     settings = get_settings()
     setup_logging(
@@ -75,7 +78,7 @@ async def lifespan(app: FastAPI):
     )
     logger = get_logger()
     logger.info("=" * 60)
-    logger.info("游戏包名爬虫系统 v2.8 启动中...")
+    logger.info("游戏包名爬虫系统 v3.0 启动中...")
     logger.info("=" * 60)
 
     # 数据库 (同步, 极快)
@@ -94,7 +97,7 @@ async def lifespan(app: FastAPI):
     download_task = asyncio.create_task(download_mgr.start())
     logger.info("下载管理器已启动 (并发={})", settings.download_concurrency)
 
-    # 浏览器管理器 — v2.8: 完全后台初始化，不阻塞服务就绪
+    # 浏览器管理器 — v3.0.1: 保存句柄以便关闭时取消
     async def _init_browser_background():
         try:
             from backend.core.browser_manager import get_browser_manager
@@ -105,7 +108,11 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             logger.warning("浏览器初始化失败 (慢速源不可用): {}", e)
 
-    asyncio.create_task(_init_browser_background())
+    browser_task = asyncio.create_task(_init_browser_background())
+
+    # v3.0.1: 每日更新面板后台任务 (run_periodic_updates 内部会立即执行首次抓取)
+    from backend.cron.update_tracker import run_periodic_updates
+    update_task = asyncio.create_task(run_periodic_updates())
 
     logger.info("代理: {}", settings.proxy or "未配置")
     logger.info("启用站点: {}", ", ".join(settings.enabled_sites))
@@ -113,13 +120,16 @@ async def lifespan(app: FastAPI):
 
     yield
 
-    # 关闭 — v2.8: 快速退出
+    # 关闭 — v3.0.1: 取消所有后台任务
     logger.info("正在关闭...")
     download_task.cancel()
+    browser_task.cancel()
+    update_task.cancel()
     try:
         await asyncio.wait_for(download_mgr.stop(), timeout=1.5)
     except asyncio.TimeoutError:
         pass
+    await asyncio.gather(browser_task, update_task, return_exceptions=True)
     close_db()
     logger.info("系统已关闭")
 
@@ -133,18 +143,28 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# 速率限制 (v3.0.1)
+limiter = Limiter(key_func=get_remote_address, default_limits=["60/minute"])
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
+    allow_origins=[
+        "http://127.0.0.1:8000",
+        "http://localhost:8000",
+        "http://127.0.0.1:5173",
+        "http://localhost:5173",
+    ],
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["*"],
 )
 
 app.include_router(router)
 
 
-# ── 健康检查 (v2.8) ─────────────────────────────────────
+# ── 健康检查 (v3.0) ─────────────────────────────────────
 
 @app.get("/api/ready")
 async def ready():

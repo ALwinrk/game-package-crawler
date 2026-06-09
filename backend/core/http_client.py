@@ -86,7 +86,91 @@ def _get_proxy_dict() -> dict | None:
     return None
 
 
-# ── Fetcher 后端 ────────────────────────────────────────────
+# ── URL 安全验证 (SSRF 防护) ─────────────────────────────
+
+import ipaddress as _ipaddress
+
+# 已知的 APK 源域名白名单
+_ALLOWED_DOMAINS: set[str] = {
+    "apkpure.com", "apkpure.net",
+    "apkcombo.com", "apkcombo.org",
+    "apkmirror.com",
+    "apkvision.org",
+    "play.google.com", "android.googleapis.com",
+    "google.com", "googleapis.com",
+}
+
+
+def validate_url(url: str, allow_all_https: bool = False) -> str:
+    """验证 URL 安全性，防止 SSRF。
+
+    规则:
+        1. 必须 http:// 或 https://
+        2. 拒绝解析到私有/回环/链路本地 IP 的域名
+        3. 若 allow_all_https=False (默认), 域名必须在白名单中
+        4. 若 allow_all_https=True, 允许任意 HTTPS URL (仅拒绝私有IP)
+
+    Returns:
+        规范化后的 URL。
+
+    Raises:
+        ValueError: URL 不安全。
+    """
+    import socket as _socket
+
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        raise ValueError(f"不支持的协议: {parsed.scheme}")
+
+    hostname = parsed.hostname
+    if not hostname:
+        raise ValueError("无效 URL: 缺少主机名")
+
+    # 拒绝原始 IP 地址 (数字格式)
+    ip = None
+    try:
+        ip = _ipaddress.ip_address(hostname)
+    except ValueError:
+        pass  # 不是 IP 地址，DNS 检查下面做
+    if ip is not None:
+        if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_multicast:
+            raise ValueError(f"拒绝内部 IP: {hostname}")
+        if ip.version == 4 and (ip.is_reserved or ip.is_unspecified):
+            raise ValueError(f"拒绝保留 IP: {hostname}")
+
+    # DNS 解析后检查 (防 DNS rebinding)
+    try:
+        resolved = _socket.getaddrinfo(hostname, None, _socket.AF_INET)
+        seen_ips: set[str] = set()
+        for family, _type, _proto, _cname, sockaddr in resolved:
+            ip_addr = sockaddr[0]  # IP 在 sockaddr 元组第一个元素
+            if ip_addr in seen_ips:
+                continue
+            seen_ips.add(ip_addr)
+            try:
+                ip = _ipaddress.ip_address(ip_addr)
+                if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_multicast:
+                    raise ValueError(f"域名 {hostname} 解析到内部 IP: {ip_addr}")
+                if ip.version == 4 and (ip.is_reserved or ip.is_unspecified):
+                    raise ValueError(f"域名 {hostname} 解析到保留 IP: {ip_addr}")
+            except ValueError as ip_err:
+                if "解析到" in str(ip_err):  # 我们的内部 IP 错误
+                    raise
+                # 其他 ValueError (如非标准 IP 格式) 忽略
+    except _socket.gaierror:
+        raise ValueError(f"域名解析失败: {hostname}")
+
+    # 域名白名单检查
+    if not allow_all_https:
+        allowed = False
+        for domain in _ALLOWED_DOMAINS:
+            if hostname == domain or hostname.endswith("." + domain):
+                allowed = True
+                break
+        if not allowed:
+            raise ValueError(f"域名不在白名单中: {hostname} 如需访问，使用 allow_all_https=True")
+
+    return parsed.geturl()# ── Fetcher 后端 ────────────────────────────────────────────
 
 _fetcher = None
 _fetcher_lock = threading.Lock()
@@ -105,7 +189,6 @@ def _get_fetcher():
 
 def _http_get_sync(url: str) -> tuple[int, str]:
     """同步 HTTP GET — Scrapling Fetcher (curl_cffi + browserforge)."""
-    from backend.config import get_settings
     settings = get_settings()
     proxies = _get_proxy_dict()
 
@@ -141,7 +224,6 @@ async def http_get(url: str) -> tuple[int, str]:
 def _stealth_get_sync(url: str) -> tuple[int, str]:
     """同步浏览器 GET — StealthySession (Chromium + CF 绕过)."""
     from scrapling.fetchers import StealthySession
-    from backend.config import get_settings
 
     settings = get_settings()
     proxies = _get_proxy_dict()
@@ -203,7 +285,6 @@ async def stealth_get(url: str) -> tuple[int, str]:
 def _js_render_get_sync(url: str) -> tuple[int, str]:
     """同步 JS 渲染 GET — StealthySession (无 CF 等待)."""
     from scrapling.fetchers import StealthySession
-    from backend.config import get_settings
 
     settings = get_settings()
     proxies = _get_proxy_dict()

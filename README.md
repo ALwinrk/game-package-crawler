@@ -1,6 +1,6 @@
-# 游戏包名爬虫系统 v2.8
+# 游戏包名爬虫系统 v3.0
 
-Android APK 版本排查工具 — FastAPI + Vue 3 前后端分离架构，支持 5 大站点并发查询、版本对比、内置异步下载（断点续传）、Excel 批量处理、记忆化输入。
+Android APK 版本排查工具 — FastAPI + Vue 3 前后端分离架构。支持 5 大站点并发查询、实时更新游戏面板（APKPure/APKCombo）、版本对比、内置异步下载（断点续传+重试+架构识别）、Excel 批量处理、记忆化输入。
 
 ## 目录结构
 
@@ -26,10 +26,12 @@ D:\game-package-crawler-proxy\
 │   │   ├── orchestrator.py  # 查询调度器 (快/慢源编排)
 │   │   └── cache.py         # TTL 爬虫缓存 + 慢任务存储
 │   ├── download/            # 异步下载管理器
-│   │   ├── manager.py       # 下载队列与进度
+│   │   ├── manager.py       # 下载队列+进度+重试+架构识别
 │   │   └── extractors.py    # URL 提取器
 │   ├── batch/               # 批量任务管理器
 │   │   └── manager.py       # 批量并发 (Semaphore 控制)
+│   ├── cron/                # 定时任务
+│   │   └── update_tracker.py # 实时更新游戏面板抓取
 │   └── db/                  # SQLite 数据库 + 记忆化
 ├── frontend/                # Vue 3 + TypeScript + Element Plus
 │   ├── index.html
@@ -42,7 +44,8 @@ D:\game-package-crawler-proxy\
 │   │   │   ├── PackageInput.vue     # 包名输入与快/慢查询
 │   │   │   ├── ResultTable.vue      # 结果展示表格
 │   │   │   ├── BatchPanel.vue       # Excel 批量面板
-│   │   │   ├── DownloadQueue.vue    # 下载队列管理
+│   │   │   ├── DownloadQueue.vue    # 下载队列管理 (含架构标签)
+│   │   │   ├── DailyUpdates.vue     # 实时更新游戏面板
 │   │   │   └── SettingsPanel.vue    # 设置面板 (代理/并发/站点)
 │   │   └── styles/
 │   │       └── global.css           # 全局样式 + 主题变量
@@ -105,6 +108,7 @@ python backend/main.py
 | `/api/fetch/slow/result/{task_id}` | GET | 轮询慢源结果 |
 | `/api/batch/upload` | POST | 上传 Excel 批量排查 |
 | `/api/download` | POST | 提交 APK 下载任务 |
+| `/api/daily-updates` | GET | 实时更新游戏面板 |
 | `/api/cache/clear` | POST | 清除爬虫缓存 |
 | `/api/memo/{pkg}` | GET | 查询记忆化版本 |
 | `/api/config` | GET/PATCH | 配置管理 |
@@ -168,6 +172,7 @@ build_exe.bat
 | v2.6 | BatchPanel 重构、DownloadQueue 独立组件 |
 | v2.7 | SettingsPanel 重做、配置热更新 |
 | v2.8 | 全局 CSS 主题变量、UI 一致性优化、启动器完善 |
+| v3.0 | 实时更新游戏面板（APKPure/APKCombo）、下载重试+HEAD预检+架构识别、APKCombo分类过滤+50K+源、APKPure版本名提取、三列分栏布局、每日更新独立标签页 |
 
 详见: `版本总览历史.md`、`系统工作流程2.4.md` ~ `系统工作流程2.8.md`
 

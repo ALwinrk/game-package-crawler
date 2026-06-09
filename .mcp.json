@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "agent-review": {
+      "type": "stdio",
+      "command": "mcp-agent-review",
+      "args": [],
+      "env": {}
+    }
+  }
+}

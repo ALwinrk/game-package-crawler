@@ -68,7 +68,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, onUnmounted } from 'vue'
 import { UploadFilled, VideoPause, VideoPlay, Close, Download } from '@element-plus/icons-vue'
 import { useAppStore } from '../stores/app'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -78,6 +78,60 @@ const store = useAppStore()
 const batchStatus = ref('')
 const uploadRef = ref()
 const batchSummary = ref<any>(null)
+let ws: WebSocket | null = null
+let wsReconnectTimer: any = null
+let wsReconnectAttempts = 0
+const MAX_RECONNECT = 5
+
+function connectWs(taskId: string) {
+  if (ws) {
+    try { ws.close() } catch { }
+  }
+  const wsUrl = store.apiBase.replace('http', 'ws')
+  ws = new WebSocket(`${wsUrl}/api/ws/${taskId}`)
+
+  ws.onopen = () => {
+    wsReconnectAttempts = 0
+  }
+
+  ws.onmessage = (event) => {
+    try {
+      const data = JSON.parse(event.data)
+      if (data.type === 'batch_progress') {
+        store.batchProgress = data.data.progress_pct || 0
+        batchStatus.value = data.data.status
+        if (data.data.status === 'completed') {
+          batchSummary.value = data.data.summary || {}
+          showCompletionDialog()
+          ws?.close()
+        }
+      }
+    } catch { }
+  }
+
+  ws.onclose = () => {
+    // 自动重连 (非正常完成的情况)
+    if (batchStatus.value === 'running' && wsReconnectAttempts < MAX_RECONNECT) {
+      wsReconnectAttempts++
+      wsReconnectTimer = setTimeout(() => {
+        if (store.batchTaskId && batchStatus.value === 'running') {
+          connectWs(store.batchTaskId)
+        }
+      }, 2000 * wsReconnectAttempts)
+    }
+  }
+
+  ws.onerror = () => {
+    // onclose 会处理重连
+  }
+}
+
+onUnmounted(() => {
+  if (wsReconnectTimer) clearTimeout(wsReconnectTimer)
+  if (ws) {
+    try { ws.close() } catch { }
+  }
+})
 
 const batchStatusLabel = computed(() => {
   const map: Record<string, string> = {
@@ -92,24 +146,9 @@ function onUploadSuccess(resp: any) {
   store.batchTotal = resp.total
   batchStatus.value = 'running'
   batchSummary.value = null
+  wsReconnectAttempts = 0
   ElMessage.success({ message: `📦 批量任务已启动: ${resp.filename} (${resp.total} 行)`, customClass: 'cyber-msg' })
-
-  const wsUrl = store.apiBase.replace('http', 'ws')
-  const ws = new WebSocket(`${wsUrl}/api/ws/${resp.task_id}`)
-  ws.onmessage = (event) => {
-    try {
-      const data = JSON.parse(event.data)
-      if (data.type === 'batch_progress') {
-        store.batchProgress = data.data.progress_pct || 0
-        batchStatus.value = data.data.status
-        if (data.data.status === 'completed') {
-          batchSummary.value = data.data.summary || {}
-          showCompletionDialog()
-          ws.close()
-        }
-      }
-    } catch { }
-  }
+  connectWs(resp.task_id)
 }
 
 function showCompletionDialog() {

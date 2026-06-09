@@ -320,6 +320,7 @@ class BatchManager:
 
         # 查找或插入列
         col_positions = []
+        new_column_names: dict[int, str] = {}  # pos -> name for inserted cols
         for col_name, keywords, width, _ in columns:
             found = 0
             for c in range(1, ws.max_column + 1):
@@ -335,12 +336,22 @@ class BatchManager:
                 insert_at = ws.max_column + 1
                 ws.insert_cols(insert_at)
                 found = insert_at
-                cell = ws.cell(1, found, col_name)
-                cell.font = HEADER_FONT
-                cell.fill = HEADER_FILL
-                cell.alignment = CENTER
+                new_column_names[found] = col_name
             col_positions.append(found)
             ws.column_dimensions[openpyxl.utils.get_column_letter(found)].width = width
+
+        # 写入新插入列的标题 (在所有插入完成后，位置已稳定)
+        for pos, name in new_column_names.items():
+            cell = ws.cell(1, pos, name)
+            cell.font = HEADER_FONT
+            cell.fill = HEADER_FILL
+            cell.alignment = CENTER
+
+        # 按实际列位置排序 (修复既有列在插入列之前导致的顺序错乱)
+        column_data = list(zip(columns, col_positions))
+        column_data.sort(key=lambda x: x[1])
+        columns = [cd[0] for cd in column_data]
+        col_positions = [cd[1] for cd in column_data]
 
         # 写入数据
         filled = 0

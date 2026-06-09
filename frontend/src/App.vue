@@ -3,11 +3,11 @@
     <!-- 动态背景 -->
     <div class="bg-animated"></div>
 
-    <!-- v2.8: 后端就绪检查 + 加载屏幕 -->
+    <!-- v3.0: 后端就绪检查 + 加载屏幕 -->
     <div v-if="!backendReady" class="loading-screen">
       <div class="loading-content">
         <span class="loading-logo">🚀</span>
-        <h2>游戏包名爬虫系统 v2.8</h2>
+        <h2>游戏包名爬虫系统 v3.0</h2>
         <p class="loading-text">正在唤醒后端服务，请稍候...</p>
         <el-progress :percentage="loadingDots" :indeterminate="true" :stroke-width="4" color="var(--color-primary)" class="loading-bar" />
         <p class="loading-sub">首次启动需初始化浏览器引擎 (约 3-5 秒)</p>
@@ -19,7 +19,7 @@
       <el-header class="app-header glass-header">
         <div class="header-left">
           <span class="header-logo">🎮</span>
-          <h1 class="header-title">游戏包名爬虫系统 <span class="version-tag">v2.8</span></h1>
+          <h1 class="header-title">游戏包名爬虫系统 <span class="version-tag">v3.0</span></h1>
         </div>
         <div class="header-right">
           <el-tooltip :content="store.darkMode ? '切换浅色模式' : '切换深色模式'" placement="bottom">
@@ -49,6 +49,15 @@
                 <p class="empty-text">输入包名，一键捉虫~</p>
                 <p class="empty-sub">支持 Google Play / APKPure / APKCombo / APKMirror / APKVision 五大源</p>
               </div>
+            </div>
+          </el-tab-pane>
+
+          <el-tab-pane name="daily">
+            <template #label>
+              <span class="tab-label">📰 实时更新</span>
+            </template>
+            <div class="tab-content animate-fade-in-scale">
+              <DailyUpdates />
             </div>
           </el-tab-pane>
 
@@ -93,9 +102,10 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
-import { Refresh, Moon, Sunny } from '@element-plus/icons-vue'
+import { Moon, Sunny } from '@element-plus/icons-vue'
 import { useAppStore } from './stores/app'
 import PackageInput from './components/PackageInput.vue'
+import DailyUpdates from './components/DailyUpdates.vue'
 import ResultTable from './components/ResultTable.vue'
 import BatchPanel from './components/BatchPanel.vue'
 import DownloadQueue from './components/DownloadQueue.vue'
@@ -106,7 +116,7 @@ const apiOnline = ref(false)
 const backendReady = ref(false)
 const loadingDots = ref(0)
 
-// v2.8: 轮询后端就绪状态
+// v3.0: 轮询后端就绪状态
 async function checkReady() {
   try {
     const resp = await fetch(`${store.apiBase}/api/ready`)
@@ -118,13 +128,6 @@ async function checkReady() {
   } catch { }
   setTimeout(checkReady, 500)
 }
-
-// 初始化深色模式
-onMounted(() => {
-  store.initDarkMode()
-  checkReady()
-  checkApi()
-})
 
 // 幽默随机语录
 const quotes = [
@@ -151,15 +154,18 @@ async function checkApi() {
   }
 }
 
-// 初始化深色模式
+// 初始化
 onMounted(() => {
   store.initDarkMode()
+  checkReady()
   checkApi()
+  store.connectGlobalWs()
 })
+
 </script>
 
 <style scoped>
-/* ── 加载屏幕 (v2.8) ─────────────────────── */
+/* ── 加载屏幕 (v3.0) ─────────────────────── */
 .loading-screen {
   position: fixed;
   inset: 0;

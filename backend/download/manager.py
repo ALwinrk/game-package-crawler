@@ -96,103 +96,128 @@ class DownloadManager:
         logger.info("下载管理器已停止")
 
     async def _download(self, task: DownloadTask):
-        """执行单个下载任务.
+        """执行单个下载任务（带重试 + 架构识别）.
 
-        策略：
-        1. aiohttp 直接下载（快速）
-        2. HTTP 403/404/0 → Playwright 浏览器下载（绕过防盗链）
+        策略:
+        1. HEAD 预检下载链接
+        2. aiohttp 直接下载（快速）
+        3. HTTP 403/404 → Playwright 浏览器下载（绕过防盗链）
+        4. 失败自动重试，最多 3 次
         """
+        max_retries = 3
+        for attempt in range(1, max_retries + 1):
+            task.retry_count = attempt
+            try:
+                await self._do_download(task, attempt)
+                return  # 成功
+            except asyncio.CancelledError:
+                task.status = "paused"
+                self._save_task(task)
+                return
+            except Exception as e:
+                if attempt < max_retries:
+                    delay = [1, 3, 6][attempt - 1]
+                    logger.warning("下载失败 (attempt {}/{}): {} — {}，{}s 后重试",
+                                   attempt, max_retries, task.package_name, e, delay)
+                    await asyncio.sleep(delay)
+                else:
+                    task.status = "error"
+                    task.error = f"{type(e).__name__}: {e!s}"[:100]
+                    self._save_task(task)
+                    await self._notify_progress(task)
+                    logger.warning("下载失败（已达最大重试）: {} — {}", task.package_name, e)
+
+    async def _do_download(self, task: DownloadTask, attempt: int):
+        """单次下载尝试."""
         task.status = "downloading"
         self._save_task(task)
 
-        try:
-            # 检查断点
-            part_path = Path(f"{task.save_path}.part")
-            headers = {}
-            if part_path.exists():
-                task.downloaded_size = part_path.stat().st_size
-                headers["Range"] = f"bytes={task.downloaded_size}-"
-                logger.debug("断点续传: {} (已下载 {} 字节)", task.package_name, task.downloaded_size)
+        part_path = Path(f"{task.save_path}.part")
+        headers = {}
+        if part_path.exists():
+            task.downloaded_size = part_path.stat().st_size
+            headers["Range"] = f"bytes={task.downloaded_size}-"
 
-            settings = get_settings()
-            proxy = settings.proxy if settings.proxy else None
+        # HEAD 预检 (首次尝试时)
+        if attempt == 1 and not headers.get("Range"):
+            if not await self._check_url_accessible(task.url):
+                logger.info("HEAD 预检失败，直接走 Playwright: {}", task.package_name)
+                await self._browser_download(task, part_path)
+                if task.status == "error":
+                    raise Exception(task.error or "浏览器下载失败")
+                return
 
-            async with self._session.get(
-                task.url,
-                headers=headers,
-                proxy=proxy,
-                timeout=aiohttp.ClientTimeout(total=600),
-            ) as resp:
-                if resp.status not in (200, 206):
-                    # 403/404 → 尝试浏览器下载
-                    if resp.status in (403, 404, 0) or resp.status >= 400:
-                        logger.info("aiohttp HTTP {}，尝试 Playwright 浏览器下载: {}", resp.status, task.package_name)
-                        await self._browser_download(task, part_path)
-                        return
-                    task.status = "error"
-                    task.error = f"HTTP {resp.status}"
-                    self._save_task(task)
-                    await self._notify_progress(task)
+        settings = get_settings()
+        proxy = settings.proxy if settings.proxy else None
+
+        async with self._session.get(
+            task.url,
+            headers=headers,
+            proxy=proxy,
+            timeout=aiohttp.ClientTimeout(total=600),
+        ) as resp:
+            if resp.status not in (200, 206):
+                if resp.status >= 400 or resp.status == 0:
+                    logger.info("aiohttp HTTP {}，尝试 Playwright: {}", resp.status, task.package_name)
+                    await self._browser_download(task, part_path)
+                    if task.status == "error":
+                        raise Exception(task.error or "浏览器下载失败")
                     return
+                raise Exception(f"HTTP {resp.status}")
 
-                content_length = resp.headers.get("Content-Length")
-                if content_length:
-                    task.total_size = task.downloaded_size + int(content_length)
+            content_length = resp.headers.get("Content-Length")
+            if content_length:
+                task.total_size = task.downloaded_size + int(content_length)
 
-                # 确保目录存在
-                os.makedirs(os.path.dirname(task.save_path), exist_ok=True)
+            # 架构识别: 从最终 URL（重定向后）或 Content-Disposition 文件名
+            final_url = str(resp.url)
+            cd = resp.headers.get("Content-Disposition", "")
+            if cd and "filename=" in cd:
+                fname = cd.split("filename=")[-1].strip('"')
+            else:
+                fname = final_url.split("/")[-1].split("?")[0]
+            detected = self._detect_arch(final_url, fname)
+            if detected and detected != "unknown":
+                task.arch = detected
+                task.abi_source = "url"
 
-                # 流式写入
-                mode = "ab" if task.downloaded_size > 0 else "wb"
-                last_sample_time = time.time()
-                last_sample_bytes = task.downloaded_size
+            os.makedirs(os.path.dirname(task.save_path), exist_ok=True)
 
-                settings = get_settings()
-                chunk_size = getattr(settings, "download_chunk_size", 1024 * 1024)
+            mode = "ab" if task.downloaded_size > 0 else "wb"
+            last_sample_time = time.time()
+            last_sample_bytes = task.downloaded_size
+            chunk_size = getattr(settings, "download_chunk_size", 1024 * 1024)
 
-                async with aiofiles.open(part_path, mode) as f:
-                    async for chunk in resp.content.iter_chunked(chunk_size):
-                        await f.write(chunk)
-                        task.downloaded_size += len(chunk)
+            async with aiofiles.open(part_path, mode) as f:
+                async for chunk in resp.content.iter_chunked(chunk_size):
+                    await f.write(chunk)
+                    task.downloaded_size += len(chunk)
+                    now = time.time()
+                    if now - last_sample_time >= 0.5:
+                        elapsed = now - last_sample_time
+                        bytes_delta = task.downloaded_size - last_sample_bytes
+                        speed_bps = bytes_delta / elapsed if elapsed > 0 else 0
+                        task.speed = self._format_speed(speed_bps)
+                        if task.total_size > 0:
+                            task.progress_pct = round(task.downloaded_size / task.total_size * 100, 1)
+                        last_sample_time = now
+                        last_sample_bytes = task.downloaded_size
+                        self._save_task(task)
+                        await self._notify_progress(task)
 
-                        # 每 0.5 秒计算速度
-                        now = time.time()
-                        if now - last_sample_time >= 0.5:
-                            elapsed = now - last_sample_time
-                            bytes_delta = task.downloaded_size - last_sample_bytes
-                            speed_bps = bytes_delta / elapsed if elapsed > 0 else 0
-                            task.speed = self._format_speed(speed_bps)
-                            if task.total_size > 0:
-                                task.progress_pct = round(task.downloaded_size / task.total_size * 100, 1)
-                            last_sample_time = now
-                            last_sample_bytes = task.downloaded_size
-                            self._save_task(task)
-                            await self._notify_progress(task)
+        # 完成
+        if part_path.exists():
+            final_path = Path(task.save_path)
+            if final_path.exists():
+                final_path.unlink()
+            part_path.rename(final_path)
 
-            # 完成：重命名 .part → .apk
-            if part_path.exists():
-                final_path = Path(task.save_path)
-                if final_path.exists():
-                    final_path.unlink()
-                part_path.rename(final_path)
-
-            task.status = "completed"
-            task.progress_pct = 100.0
-            task.speed = ""
-            self._save_task(task)
-            await self._notify_progress(task)
-            logger.info("下载完成: {} → {}", task.package_name, task.save_path)
-
-        except asyncio.CancelledError:
-            task.status = "paused"
-            self._save_task(task)
-            logger.info("下载暂停: {}", task.package_name)
-        except Exception as e:
-            task.status = "error"
-            task.error = f"{type(e).__name__}: {e!s}"[:100]
-            self._save_task(task)
-            await self._notify_progress(task)
-            logger.warning("下载失败: {} — {}", task.package_name, e)
+        task.status = "completed"
+        task.progress_pct = 100.0
+        task.speed = ""
+        self._save_task(task)
+        await self._notify_progress(task)
+        logger.info("下载完成: {} → {} (arch={})", task.package_name, task.save_path, task.arch)
 
     async def _browser_download(self, task: DownloadTask, part_path: Path):
         """APKPure/APKCombo 防盗链下载（设计文档 5.1.6）.
@@ -237,6 +262,10 @@ class DownloadManager:
                     def _on_download(download):
                         try:
                             suggested = download.suggested_filename
+                            # 从文件名识别架构
+                            arch = DownloadManager._detect_arch("", suggested)
+                            if arch != "unknown":
+                                download_completed["arch"] = arch
                             save_as = str(Path(task.save_path).parent / suggested)
                             download.save_as(save_as)
                             download_completed["done"] = True
@@ -321,6 +350,11 @@ class DownloadManager:
             task.downloaded_size = data if isinstance(data, int) else 0
             task.progress_pct = 100.0
             task.total_size = task.downloaded_size
+            # 从文件名识别架构
+            detected = download_completed.get("arch", "")
+            if detected and task.arch == "unknown":
+                task.arch = detected
+                task.abi_source = "filename"
             if part_path.exists():
                 final_path = Path(task.save_path)
                 if final_path.exists():
@@ -330,7 +364,7 @@ class DownloadManager:
             task.speed = ""
             self._save_task(task)
             await self._notify_progress(task)
-            logger.info("浏览器下载完成: {} ({} bytes)", task.package_name, task.downloaded_size)
+            logger.info("浏览器下载完成: {} ({} bytes, arch={})", task.package_name, task.downloaded_size, task.arch)
         else:
             task.status = "error"
             task.error = str(data)
@@ -360,16 +394,45 @@ class DownloadManager:
             self._active_tasks[task.id] = task
             logger.info("恢复下载任务: {}", task.package_name)
 
+    async def _check_url_accessible(self, url: str) -> bool:
+        """HEAD 请求验证下载链接是否可访问."""
+        try:
+            async with self._session.head(
+                url, timeout=aiohttp.ClientTimeout(total=8), allow_redirects=True
+            ) as resp:
+                return resp.status in (200, 206)
+        except Exception:
+            return False
+
+    @staticmethod
+    def _detect_arch(url: str, filename: str) -> str:
+        """从 URL 和文件名检测架构."""
+        import re as _re
+        text = f"{url} {filename}".lower()
+        if _re.search(r'arm64|aarch64|arm64-v8a|arm64_v8a', text):
+            return "arm64-v8a"
+        if _re.search(r'armeabi-v7a|armeabi|armv7', text):
+            return "armeabi-v7a"
+        if _re.search(r'x86_64|x64', text):
+            return "x86_64"
+        if _re.search(r'(?<![_a-z])x86(?![_a-z])', text):
+            return "x86"
+        if _re.search(r'universal|nodpi|all_arch', text):
+            return "universal"
+        return "unknown"
+
     def _save_task(self, task: DownloadTask):
         """持久化任务到 SQLite."""
         conn = get_connection()
         conn.execute("""
             INSERT OR REPLACE INTO download_tasks
-            (id, url, package_name, version, arch, save_path, total_size, downloaded_size, status, error, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            (id, url, package_name, version, arch, abi_source, save_path,
+             total_size, downloaded_size, status, retry_count, error, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
         """, (
             task.id, task.url, task.package_name, task.version, task.arch,
-            task.save_path, task.total_size, task.downloaded_size, task.status, task.error,
+            task.abi_source, task.save_path, task.total_size, task.downloaded_size,
+            task.status, task.retry_count, task.error,
         ))
         conn.commit()
 
@@ -379,6 +442,17 @@ class DownloadManager:
             self._active_tasks[task_id].status = "paused"
             self._save_task(self._active_tasks[task_id])
             return True
+        return False
+
+    def resume_task(self, task_id: str) -> bool:
+        """恢复暂停的下载."""
+        if task_id in self._active_tasks:
+            task = self._active_tasks[task_id]
+            if task.status == "paused":
+                task.status = "pending"
+                self._save_task(task)
+                asyncio.create_task(self._queue.put(task))
+                return True
         return False
 
     def cancel_task(self, task_id: str) -> bool:

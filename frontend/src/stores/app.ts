@@ -92,19 +92,49 @@ export const useAppStore = defineStore('app', () => {
   // 设置
   const apiBase = ref('http://127.0.0.1:8000')
 
+  // ── 全局 WebSocket (替代轮询，v2.8+) ──
+  let globalWs: WebSocket | null = null
+  let wsReconnectTimer: any = null
+
+  function connectGlobalWs() {
+    if (globalWs && globalWs.readyState === WebSocket.OPEN) return
+    try {
+      const wsUrl = apiBase.value.replace('http', 'ws')
+      globalWs = new WebSocket(`${wsUrl}/api/ws`)
+
+      globalWs.onopen = () => {
+        // 连接后立即刷新下载列表以获取当前状态
+        refreshDownloads()
+      }
+
+      globalWs.onmessage = (event) => {
+        try {
+          const msg = JSON.parse(event.data)
+          if (msg.type === 'download_progress') {
+            const task = msg.data
+            // 原地更新或添加下载任务
+            const idx = downloadTasks.value.findIndex(t => t.id === task.id)
+            if (idx >= 0) {
+              downloadTasks.value[idx] = { ...downloadTasks.value[idx], ...task }
+            } else {
+              downloadTasks.value.push(task as DownloadTask)
+            }
+          } else if (msg.type === 'batch_fetch_progress') {
+            // 批量查询进度 (来自 /api/fetch/batch)
+            batchProgress.value = msg.data.progress_pct || 0
+          }
+        } catch { }
+      }
+
+      globalWs.onclose = () => {
+        // 自动重连 (3s 延迟)
+        wsReconnectTimer = setTimeout(connectGlobalWs, 3000)
+      }
+    } catch { }
+  }
+
   // ── 计算 ──
   const latestResult = computed(() => results.value[0] || null)
-
-  const sourceStatus = computed(() => {
-    if (!latestResult.value) return []
-    return Object.entries(latestResult.value.results).map(([name, r]) => ({
-      name,
-      version: r.version,
-      error: r.error,
-      ok: r.version && !r.error,
-      detail_url: r.detail_url,
-    }))
-  })
 
   // ── API 调用 ──
   async function doFetch(packageName: string) {
@@ -231,7 +261,7 @@ export const useAppStore = defineStore('app', () => {
     activeTab, loading, packageInput, expectedVersion, expectedVersionCode,
     fetchMode, results, batchTaskId, batchProgress, batchTotal,
     downloadTasks, apiBase,
-    latestResult, sourceStatus,
-    doFetch, doFetchBatch, checkMemo, saveMemo, submitDownload, refreshDownloads, extractLinks,
+    latestResult,
+    doFetch, doFetchBatch, checkMemo, saveMemo, submitDownload, refreshDownloads, extractLinks, connectGlobalWs,
   }
 })

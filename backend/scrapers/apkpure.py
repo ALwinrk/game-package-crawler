@@ -5,7 +5,7 @@
 
 from __future__ import annotations
 
-import re
+import re as _re
 from urllib.parse import urljoin
 
 from backend.core.http_client import http_get, js_render_get, is_cloudflare_block
@@ -47,10 +47,16 @@ class ApkpureScraper(BaseScraper):
         if detail_url:
             return await self._fetch_from_url(detail_url, package)
 
-        # Step 5: 兜底
-        return await self._fetch_from_url(
+        # Step 5: 兜底 — .net 搜索页 (v2.8.1: 追加详情页直连)
+        result = await self._fetch_from_url(
             f"https://apkpure.net/search?q={package}", package,
         )
+        if not result.ok:
+            # 最后尝试详情页直连 (apkpure.com/cn/{package})
+            result = await self._fetch_from_url(
+                f"https://apkpure.com/cn/{package}", package,
+            )
+        return result
 
     def _to_cn_url(self, url: str) -> str:
         """将 APKPure URL 转为中文站: apkpure.com/slug → apkpure.com/cn/slug."""
@@ -98,7 +104,6 @@ class ApkpureScraper(BaseScraper):
 
     def _extract_app_name(self, html: str) -> str | None:
         """从 APKPure 详情页提取应用名."""
-        import re as _re
         m = _re.search(r'data-dt-title\s*=\s*"([^"]+)"', html)
         if m:
             return m.group(1).strip()
@@ -119,8 +124,6 @@ class ApkpureScraper(BaseScraper):
         2. 匹配 .show-more-content 内的所有文本
         3. data-dt-whatsnew 属性 (fallback, 通常只有标题)
         """
-        import re as _re
-
         # 策略 1: APKPure 标准结构 — .whats-new-container 内的 p.text
         container_match = _re.search(
             r'<div[^>]*class="[^"]*whats-new-container[^"]*"[^>]*>(.*?)</div>\s*(?:</div>)?\s*</div>\s*</div>',
@@ -167,23 +170,43 @@ class ApkpureScraper(BaseScraper):
         return text.strip()
 
     def _extract_detail_url(self, html: str, pkg: str) -> str | None:
-        """从 APKPure 搜索结果页提取目标 app 的详情页 URL.
+        """从 APKPure 搜索结果页提取目标 app 的详情页 URL (v2.8.1: 多模式).
 
         加固策略:
         1. 精确匹配完整包名在 URL 路径中 (作为路径段, 而非 URL 参数)
         2. 排除 /search 路径
         3. 多个结果时, 取第一个 (最佳匹配在前)
-        4. v2.8: 中文站转换在 _to_cn_url() 统一处理
+        4. 多域名格式兼容 (apkpure.com / apkpure.net)
+        5. v2.8: 中文站转换在 _to_cn_url() 统一处理
         """
-        escaped = re.escape(pkg)
-        pattern = r'href="((?:https?://apkpure\.com)?/[^"]*?' + escaped + r'[^"]*)"'
+        escaped = _re.escape(pkg)
+
+        # 模式 1: 标准链接格式 (双引号, apkpure.com)
+        pattern = r'href="((?:https?://apkpure\.(?:com|net))?/[^"]*?' + escaped + r'[^"]*)"'
         candidates = []
-        for m in re.finditer(pattern, html):
+        for m in _re.finditer(pattern, html):
             url = urljoin("https://apkpure.com", m.group(1))
             if "/search" in url:
                 continue
             if f"/{pkg}" in url or f"/{pkg}?" in url or url.endswith(f"/{pkg}"):
                 candidates.append(url)
+
+        # 模式 2: 单引号链接
+        if not candidates:
+            pattern2 = r"href='((?:https?://apkpure\.(?:com|net))?/[^']*?" + escaped + r"[^']*)'"
+            for m in _re.finditer(pattern2, html):
+                url = urljoin("https://apkpure.com", m.group(1))
+                if "/search" not in url:
+                    candidates.append(url)
+
+        # 模式 3: 相对路径 (不带域名)
+        if not candidates:
+            pattern3 = r'href="(/(?:[^"]*?/)?' + escaped + r'[^"]*)"'
+            for m in _re.finditer(pattern3, html):
+                url = urljoin("https://apkpure.com", m.group(1))
+                if "/search" not in url:
+                    candidates.append(url)
+
         if candidates:
             logger.debug("APKPure 搜索页找到 {} 个候选链接, 取第一个: {}", len(candidates), candidates[0])
             return candidates[0]

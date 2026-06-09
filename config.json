@@ -2,13 +2,12 @@
   "download_path": "./downloads",
   "download_concurrency": 3,
   "download_chunk_size": 1048576,
-  "scraper_concurrency": 4,
+  "scraper_concurrency": 6,
   "playwright_concurrency": 2,
+  "retry_times": 2,
+  "retry_delay": 1.0,
   "batch_concurrency": 5,
   "cache_ttl_seconds": 300,
-  "request_interval": 1,
-  "retry_times": 2,
-  "retry_delay": 1,
   "proxy": "http://127.0.0.1:7897",
   "enabled_sites": [
     "google_play",
@@ -20,8 +19,10 @@
   "google_play_cookie_path": "",
   "log_level": "INFO",
   "log_retention_days": 30,
-  "auto_cleanup_days": 7,
-  "language": "zh",
-  "request_timeout": 10,
-  "stealth_timeout": 60
+  "request_timeout": 10.0,
+  "stealth_timeout": 60.0,
+  "update_check_interval": 1800,
+  "daily_updates_pages": 3,
+  "daily_updates_limit": 100,
+  "frontend_poll_interval": 300
 }

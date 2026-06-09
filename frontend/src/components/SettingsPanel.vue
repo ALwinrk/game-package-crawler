@@ -6,7 +6,7 @@
         <div class="card-header">
           <span>🎨 界面主题</span>
           <el-switch
-            v-model="store.darkMode"
+            :model-value="store.darkMode"
             :active-icon="Moon"
             :inactive-icon="Sunny"
             inline-prompt
@@ -122,7 +122,7 @@
             💾 保存设置
           </el-button>
           <el-button :icon="RefreshRight" @click="loadConfig" round>
-            恢复默认
+            重新加载
           </el-button>
           <el-button :icon="Delete" @click="clearCache" type="danger" plain round>
             清除缓存
@@ -193,7 +193,6 @@ const config = reactive({
   stealth_timeout: 60.0,
   enabled_sites: ['google_play', 'apkpure', 'apkcombo', 'apkmirror', 'apkvision'],
   google_play_cookie_path: '',
-  language: 'zh',
 })
 
 async function loadConfig() {
@@ -227,11 +226,12 @@ async function testProxy() {
   }
   testingProxy.value = true
   try {
-    const resp = await fetch(`${store.apiBase}/api/health`)
-    if (resp.ok) {
-      ElMessage.success({ message: '✅ 代理连接正常', customClass: 'cyber-msg' })
+    const resp = await fetch(`${store.apiBase}/api/test-proxy`, { method: 'POST' })
+    const data = await resp.json()
+    if (data.ok) {
+      ElMessage.success({ message: `✅ 代理连接正常 (${data.latency_ms}ms)`, customClass: 'cyber-msg' })
     } else {
-      ElMessage.warning({ message: '代理可能不太稳定...', customClass: 'cyber-msg' })
+      ElMessage.warning({ message: `⚠️ ${data.error || '代理可能不太稳定...'}`, customClass: 'cyber-msg' })
     }
   } catch {
     ElMessage.error({ message: '代理连接失败，检查下配置吧~', customClass: 'cyber-msg' })

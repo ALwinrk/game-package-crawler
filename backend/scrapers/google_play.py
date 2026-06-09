@@ -9,6 +9,7 @@ import asyncio
 import json
 import os
 import threading
+from datetime import datetime
 from pathlib import Path
 
 from backend.config import get_settings
@@ -47,6 +48,8 @@ class GooglePlayScraper(BaseScraper):
 
         中文 Google Play (lang=zh, country=cn) 的 recentChanges 常为空,
         英文站 (lang=en, country=us) 几乎总有完整 changelog。
+
+        v2.8.1: 修复 Cookie 传递问题 + 库异常时降级到 HTTP 解析.
         """
         try:
             _setup_urllib_proxy()
@@ -80,7 +83,6 @@ class GooglePlayScraper(BaseScraper):
             release_date = None
             updated_ts = info_cn.get("updated") or info_en.get("updated")
             if updated_ts:
-                from datetime import datetime
                 try:
                     release_date = datetime.fromtimestamp(int(updated_ts)).strftime("%Y-%m-%d")
                 except (ValueError, OSError):
@@ -100,7 +102,8 @@ class GooglePlayScraper(BaseScraper):
                 whats_new=whats_new_early or None,
             )
         except ImportError:
-            return ApkInfo(source=self.name, package=package, error="google-play-scraper 未安装")
+            # v2.8.1: 库不可用时降级到 HTTP 解析 Google Play 页面
+            return await self._fallback_http(package)
         except Exception as e:
             err_msg = f"{type(e).__name__}: {e!s}"[:100]
             if "404" in err_msg or "NotFoundError" in err_msg:
@@ -110,10 +113,42 @@ class GooglePlayScraper(BaseScraper):
             return ApkInfo(source=self.name, package=package, error=err_msg)
 
     def _gp_fetch(self, package: str, cookie_data: dict | None, lang: str = "en", country: str = "us"):
-        """同步执行 google-play-scraper 调用."""
+        """同步执行 google-play-scraper 调用.
+
+        v2.8.1: 将 cookie_data 传递给 gp_app, 修复 Cookie 功能失效问题.
+        """
         from google_play_scraper import app as gp_app
-        kwargs = {"lang": lang, "country": country}
+        kwargs: dict = {"lang": lang, "country": country}
+        if cookie_data:
+            kwargs["cookie"] = cookie_data
         return gp_app(package, **kwargs)
+
+    async def _fallback_http(self, package: str) -> ApkInfo:
+        """v2.8.1: google-play-scraper 不可用时的 HTTP 降级.
+
+        直接请求 Google Play 页面, 用通用解析器提取版本.
+        """
+        try:
+            from backend.core.http_client import http_get
+            from backend.core.parser import extract_both
+
+            url = f"https://play.google.com/store/apps/details?id={package}&hl=zh_CN"
+            status, html = await http_get(url)
+            if status == 200 and len(html) > 500:
+                version, vcode = extract_both(html, package)
+                if version:
+                    return ApkInfo(
+                        source=self.name,
+                        package=package,
+                        version=version,
+                        version_code=vcode,
+                        detail_url=url,
+                    )
+            return ApkInfo(source=self.name, package=package,
+                           error=f"Google Play unreachable (HTTP {status})")
+        except Exception as e:
+            return ApkInfo(source=self.name, package=package,
+                           error=f"Fallback failed: {type(e).__name__}")
 
     def _load_cookies(self) -> dict | None:
         """从配置中的 cookie 文件加载."""

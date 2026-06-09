@@ -176,6 +176,8 @@ a = Analysis(
         "backend.memo.store",
         "backend.db",
         "backend.db.database",
+        "backend.cron",
+        "backend.cron.update_tracker",
     ],
     hookspath=[],
     hooksconfig={},

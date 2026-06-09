@@ -22,6 +22,13 @@ def get_connection() -> sqlite3.Connection:
         _local.conn.execute("PRAGMA journal_mode=WAL")
         _local.conn.execute("PRAGMA synchronous=NORMAL")
         _local.conn.execute("PRAGMA foreign_keys=ON")
+    else:
+        # v2.8.1: 检测连接是否已被外部关闭 (如 update_tracker 的 _sync() 关闭后)
+        try:
+            _local.conn.execute("SELECT 1")
+        except (sqlite3.ProgrammingError, sqlite3.InterfaceError):
+            _local.conn = None
+            return get_connection()
     return _local.conn
 
 
@@ -47,15 +54,22 @@ def init_db() -> None:
             package_name TEXT,
             version TEXT,
             arch TEXT,
+            abi_source TEXT DEFAULT '',
             save_path TEXT NOT NULL,
             total_size INTEGER DEFAULT 0,
             downloaded_size INTEGER DEFAULT 0,
             status TEXT DEFAULT 'pending',
+            retry_count INTEGER DEFAULT 0,
             error TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
+    for col, col_type in [("abi_source", "TEXT DEFAULT ''"), ("retry_count", "INTEGER DEFAULT 0")]:
+        try:
+            conn.execute(f"ALTER TABLE download_tasks ADD COLUMN {col} {col_type}")
+        except sqlite3.OperationalError:
+            pass
 
     # 批量任务表
     conn.execute("""
@@ -69,6 +83,47 @@ def init_db() -> None:
             error TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+    # v2.8.1: 每日更新面板
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS daily_updates (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            source TEXT NOT NULL,
+            app_name TEXT,
+            icon_url TEXT DEFAULT '',
+            detail_url TEXT DEFAULT '',
+            package_name TEXT NOT NULL,
+            download_count TEXT DEFAULT '',
+            version_name TEXT,
+            version_code TEXT DEFAULT '',
+            updated_at TIMESTAMP,
+            fetched_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    # v2.8.2: 兼容旧表 — 新增列
+    for col, col_type in [
+        ("icon_url", "TEXT DEFAULT ''"),
+        ("detail_url", "TEXT DEFAULT ''"),
+        ("download_count", "TEXT DEFAULT ''"),
+    ]:
+        try:
+            conn.execute(f"ALTER TABLE daily_updates ADD COLUMN {col} {col_type}")
+        except sqlite3.OperationalError:
+            pass  # 列已存在, SQLite 不支持 IF NOT EXISTS
+    conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_source_package
+        ON daily_updates(source, package_name)
+    """)
+
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS daily_updates_circuit_breaker (
+            source TEXT PRIMARY KEY,
+            consecutive_failures INTEGER DEFAULT 0,
+            last_failure_time TIMESTAMP,
+            is_open BOOLEAN DEFAULT 0,
+            open_until TIMESTAMP
         )
     """)
 

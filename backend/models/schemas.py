@@ -98,10 +98,12 @@ class DownloadTask:
     version: str
     arch: str
     save_path: str
-    detail_url: str = ""       # 详情页 URL (Playwright 下载时需要)
+    detail_url: str = ""
+    abi_source: str = ""       # 架构识别来源: url / filename / page
     total_size: int = 0
     downloaded_size: int = 0
-    status: str = "pending"  # pending / downloading / paused / completed / error
+    status: str = "pending"
+    retry_count: int = 0
     speed: str = ""
     progress_pct: float = 0.0
     error: str | None = None
@@ -113,10 +115,12 @@ class DownloadTask:
             "package_name": self.package_name,
             "version": self.version,
             "arch": self.arch,
+            "abi_source": self.abi_source,
             "save_path": self.save_path,
             "total_size": self.total_size,
             "downloaded_size": self.downloaded_size,
             "status": self.status,
+            "retry_count": self.retry_count,
             "speed": self.speed,
             "progress_pct": self.progress_pct,
             "error": self.error,
