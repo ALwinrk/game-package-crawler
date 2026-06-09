@@ -274,14 +274,23 @@ async def _fetch_detail_time_apkpure(item: dict) -> dict:
                 logger.debug("APKPure detail page failed: {} HTTP {}", detail_url[:60], status)
                 return item
             soup = BeautifulSoup(html, "html.parser")
-            info_el = soup.select_one(".additional-info")
-            if info_el:
-                date_text = info_el.get_text(strip=True)
-                parsed = _parse_cn_date(date_text)
+            # v3.5: apkpure.net 详情页日期在 update-date 类元素中, 非 .additional-info
+            for sel in (".update-date", ".details-sdk .info-item", "[class*='update']"):
+                date_el = soup.select_one(sel)
+                if date_el:
+                    date_text = date_el.get_text(strip=True)
+                    parsed = _parse_cn_date(date_text)
+                    if parsed:
+                        item["updated_at"] = parsed
+                        return item
+            # 回退: 全文搜索中文日期
+            date_match = _CN_DATE_RE.search(html)
+            if date_match:
+                parsed = _parse_cn_date(date_match.group(0))
                 if parsed:
                     item["updated_at"] = parsed
                     return item
-            logger.debug("APKPure detail page: .additional-info not found for {}", item.get("package_name"))
+            logger.debug("APKPure detail page: date not found for {}", item.get("package_name"))
         except asyncio.TimeoutError:
             logger.debug("APKPure detail page timeout: {}", detail_url[:60])
         except Exception as exc:
