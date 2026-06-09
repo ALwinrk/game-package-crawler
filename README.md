@@ -172,7 +172,9 @@ python backend/main.py
 | 端点 | 方法 | 说明 |
 |------|------|------|
 | `/api/daily-updates` | GET | 获取 APKPure/APKCombo/APKVision 最近更新 (支持 304 条件请求) |
-| `/api/daily-updates/refresh` | POST | 手动触发爬取并等待完成 (最多 45s) |
+| `/api/daily-updates/refresh` | POST | v3.5 fire-and-forget 全量刷新 (立即返回, 后台执行) |
+| `/api/daily-updates/refresh-incremental` | POST | v3.5 fire-and-forget 增量刷新 (立即返回, 后台执行) |
+| `/api/daily-updates/refresh-status` | GET | 查询刷新任务是否正在运行 |
 
 ### 记忆化 & WebSocket
 
@@ -320,7 +322,7 @@ build_exe.bat
 | v3.2 | **启动优化**: DB 缓存预热，有数据立即可用。**EXE 数据持久化**: 工作目录改为 EXE 所在目录。**配置安全**: 热更新白名单移除敏感字段 + 数值类型校验。**手动刷新**: 触发实际爬取并等待完成。**APKPure 优化**: 分类砍半 + stealth 降级 + 批次间暂停。**UI**: 右键复制包名、实时面板置顶。**前端**: 所有 fetch 增加 resp.ok 检查 + catch 块日志 |
 | v3.3 | **反封禁**: TLS 指纹轮换 (5 指纹池) + 分类随机顺序 + 间隔随机化 3-7s。**Chromium 持久化**: 复制到 EXE 目录防杀软拦截，启动零 EPIPE。**浏览器反检测**: AutomationControlled + 随机 viewport + stealth 脚本。**熔断增强**: API 手工重置 + 连续失败自动降频至 7200s。**下载修复**: APKCombo/APKPure URL 双语言码修复 + HTML 页面自动降级 Playwright + JS 触发带 Referer 下载。**UI**: 结果表格三按钮 (详情页/浏览器下载/点击下载) |
 | v3.4 | **增量更新**: Top-N 增量+提前终止算法, 定时更新请求量 -83%。**入库去重**: (source,package) 唯一索引 + INSERT OR REPLACE 合并。**容量控制**: 数据库 150/面板 90-90-60 分源可配。**双刷新模式**: 全量/增量按钮 + 刷新面板按钮。**首次全量**: full_refresh 标志跳过提前终止。**服务器部署**: ms-playwright Chromium 兜底。**EXE 稳定性**: 全局异常捕获 + 端口占用检查 + 版本号统一 v3.4 |
-| v3.5 | **CF 防护**: StealthySession 子类限制 CF 求解递归 (_MAX_CF_SOLVE_ATTEMPTS=2), 防止 interactive Turnstile 无限循环。**域名切换**: APKPure 主域名 apkpure.com → apkpure.net (Fetcher 可用)。**CF 感知熔断**: record_cf_failure 2× 权重加速降频/熔断。**面板调整**: 各源独立展示上限 (60/40/60/30/30)。**超时优化**: stealth_timeout 45→30s |
+| v3.5 | **CF 防护**: StealthySession 子类限制 CF 求解递归 (_MAX_CF_SOLVE_ATTEMPTS=2), 防止 interactive Turnstile 无限循环。**域名切换**: APKPure 主域名 apkpure.com → apkpure.net (Fetcher 可用)。**CF 感知熔断**: record_cf_failure 2× 权重加速降频/熔断。**面板调整**: 各源独立展示上限 (60/40/60/30/30)。**刷新改版**: fire-and-forget 模式，点击立即返回，后台执行 + 前端自动轮询，彻底解决超时等待。**超时优化**: stealth_timeout 45→30s |
 
 详见: `版本总历史.md`、`系统工作流程\系统工作流程.md`
 

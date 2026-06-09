@@ -681,26 +681,65 @@ async def daily_updates(
     return JSONResponse(content=result, headers=headers)
 
 
+# ── 刷新状态 (v3.5: fire-and-forget 避免前端超时等待) ──
+_refresh_running: bool = False
+_refresh_lock = asyncio.Lock()
+
+
 @router.post("/daily-updates/refresh")
 async def trigger_daily_refresh():
-    """全量刷新 — 重新抓取所有数据源的全部页面（最多 45s)."""
+    """v3.5 fire-and-forget: 立即返回, 后台全量刷新."""
+    global _refresh_running
     from backend.cron.update_tracker import update_once
-    try:
-        await asyncio.wait_for(update_once(full_refresh=True), timeout=45.0)
-        return {"status": "ok", "message": "全量刷新完成"}
-    except asyncio.TimeoutError:
-        return {"status": "timeout", "message": "刷新超时，后台继续"}
+
+    async with _refresh_lock:
+        if _refresh_running:
+            return {"status": "busy", "message": "刷新已在后台运行中，请稍后再试"}
+        _refresh_running = True
+
+    async def _run():
+        global _refresh_running
+        try:
+            await update_once(full_refresh=True)
+            logger.info("全量刷新完成 (后台)")
+        except Exception as e:
+            logger.error("全量刷新失败: {}", e)
+        finally:
+            _refresh_running = False
+
+    asyncio.create_task(_run())
+    return {"status": "started", "message": "全量刷新已启动，后台执行中（约 60s）"}
 
 
 @router.post("/daily-updates/refresh-incremental")
 async def trigger_incremental_refresh():
-    """v3.4 增量刷新 — 只抓首页新数据, 速度快且不易被封（最多 30s)."""
+    """v3.5 fire-and-forget: 立即返回, 后台增量刷新."""
+    global _refresh_running
     from backend.cron.update_tracker import update_once
-    try:
-        await asyncio.wait_for(update_once(full_refresh=False), timeout=30.0)
-        return {"status": "ok", "message": "增量刷新完成"}
-    except asyncio.TimeoutError:
-        return {"status": "timeout", "message": "增量刷新超时，后台继续"}
+
+    async with _refresh_lock:
+        if _refresh_running:
+            return {"status": "busy", "message": "刷新已在后台运行中，请稍后再试"}
+        _refresh_running = True
+
+    async def _run():
+        global _refresh_running
+        try:
+            await update_once(full_refresh=False)
+            logger.info("增量刷新完成 (后台)")
+        except Exception as e:
+            logger.error("增量刷新失败: {}", e)
+        finally:
+            _refresh_running = False
+
+    asyncio.create_task(_run())
+    return {"status": "started", "message": "增量刷新已启动，后台执行中（约 60s）"}
+
+
+@router.get("/daily-updates/refresh-status")
+async def refresh_status():
+    """查询刷新任务是否正在运行."""
+    return {"running": _refresh_running}
 
 
 @router.post("/apkpure/unblock")

@@ -334,45 +334,76 @@ async function refreshPanel(): Promise<void> {
     await fetchUpdates(true)
     ElMessage.success('面板已刷新')
   } catch {
-    // silent
+    ElMessage.warning('面板数据加载失败')
   } finally {
     loadingPanel.value = false
   }
 }
 
-/** 增量刷新 — 只抓首页新数据, 快且安全 */
+const refreshPolling = ref(false)  // v3.5: 后台刷新轮询中
+
+/** v3.5: 后台刷新完成后轮询拉取数据 */
+function startRefreshPolling(label: string): void {
+  if (refreshPolling.value) return
+  refreshPolling.value = true
+  let attempts = 0
+  const maxAttempts = 24
+  const timer = setInterval(async () => {
+    attempts++
+    await fetchUpdates(true)
+    try {
+      const sr = await fetch(`${store.apiBase}/api/daily-updates/refresh-status`)
+      const sj = await sr.json()
+      if (!sj.running || attempts >= maxAttempts) {
+        clearInterval(timer)
+        refreshPolling.value = false
+        if (attempts >= maxAttempts) ElMessage.warning(`${label}：等待超时，请稍后手动刷新面板`)
+        else ElMessage.success(`${label}完成`)
+      }
+    } catch {
+      clearInterval(timer)
+      refreshPolling.value = false
+    }
+  }, 5000)
+}
+
+/** v3.5 fire-and-forget: 增量刷新 — 立即返回, 后台执行 */
 async function refreshIncremental(): Promise<void> {
   loadingIncr.value = true
   try {
     const resp = await fetch(`${store.apiBase}/api/daily-updates/refresh-incremental`, { method: 'POST' })
     const result = await resp.json()
-    if (result.status === 'ok') {
-      ElMessage.success('增量刷新完成')
+    if (result.status === 'started') {
+      ElMessage.info('增量刷新已启动，后台抓取中...')
+      startRefreshPolling('增量刷新')
+    } else if (result.status === 'busy') {
+      ElMessage.warning('刷新已在后台运行中')
     } else {
-      ElMessage.warning('增量刷新超时，稍后自动更新')
+      ElMessage.warning(result.message || '未知状态')
     }
-    await fetchUpdates(true)
   } catch {
-    fetchUpdates(true)
+    ElMessage.error('增量刷新请求失败')
   } finally {
     loadingIncr.value = false
   }
 }
 
-/** 全量刷新 — 重新抓取所有页面, 数据最全但请求量大 */
+/** v3.5 fire-and-forget: 全量刷新 — 立即返回, 后台执行 */
 async function refreshFull(): Promise<void> {
   loadingFull.value = true
   try {
     const resp = await fetch(`${store.apiBase}/api/daily-updates/refresh`, { method: 'POST' })
     const result = await resp.json()
-    if (result.status === 'ok') {
-      ElMessage.success('全量刷新完成')
+    if (result.status === 'started') {
+      ElMessage.info('全量刷新已启动，后台抓取中...')
+      startRefreshPolling('全量刷新')
+    } else if (result.status === 'busy') {
+      ElMessage.warning('刷新已在后台运行中')
     } else {
-      ElMessage.warning('全量刷新超时，稍后自动更新')
+      ElMessage.warning(result.message || '未知状态')
     }
-    await fetchUpdates(true)
   } catch {
-    fetchUpdates(true)
+    ElMessage.error('全量刷新请求失败')
   } finally {
     loadingFull.value = false
   }
