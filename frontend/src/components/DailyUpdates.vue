@@ -313,6 +313,7 @@ async function fetchUpdates(force: boolean = false): Promise<void> {
     if (json.poll_interval) resetPollTimer(json.poll_interval * 1000)
   } catch (e) {
     console.error('Daily updates fetch failed', e)
+    ElMessage.error('面板数据加载失败，请检查网络连接')
   } finally {
     loading.value = false
   }

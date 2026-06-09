@@ -290,13 +290,19 @@ async def _fetch_detail_time_apkpure(item: dict) -> dict:
 
 
 async def _fetch_detail_time_apkcombo(item: dict) -> dict:
-    """访问 APKCombo 详情页获取真实更新时间."""
+    """访问 APKCombo 详情页获取真实更新时间.
+
+    v3.5: 增加 CF 检测, 防止 stealth 无限循环.
+    """
     async with _DETAIL_SEMAPHORE:
         detail_url = item.get("detail_url", "")
         if not detail_url:
             return item
         try:
             status, html = await http_get(detail_url)
+            if is_cloudflare_block(html):
+                logger.debug("APKCombo detail CF blocked: {}", detail_url[:60])
+                return item
             if status != 200 or len(html) < 1000:
                 logger.debug("APKCombo detail page failed: {} HTTP {}", detail_url[:60], status)
                 return item
@@ -487,14 +493,17 @@ async def fetch_apkpure_updates(full_refresh: bool = False):
         return []
     logger.info("APKPure incremental: {} new items from {} categories, enriching...",
                 len(all_items), len(APKPURE_CATEGORIES))
-    all_items = await _enrich_with_detail_times(all_items, "apkpure", max_enrich=30)
+    all_items = await _enrich_with_detail_times(all_items, "apkpure", max_enrich=90)
     logger.info("APKPure enriched: {} items", len(all_items))
     return all_items
 
 
-async def fetch_apkcombo_updates():
-    """v3.4 增量: 只抓热门首页, 仅富化新游戏."""
-    existing = _load_existing_packages("apkcombo")
+async def fetch_apkcombo_updates(full_refresh: bool = False):
+    """v3.4 增量: 只抓热门首页, 仅富化新游戏.
+
+    v3.5: full_refresh=True 时不过滤已有包名, 避免并发竞争导致空返回.
+    """
+    existing = _load_existing_packages("apkcombo") if not full_refresh else set()
     url = "https://apkcombo.com/zh/category/game/"
     status, html = await _fetch_page(url)
     if status != 200 or len(html) < 500:
@@ -503,24 +512,29 @@ async def fetch_apkcombo_updates():
     if not items:
         raise Exception("APKCombo parse empty, page structure may have changed")
 
-    # 仅保留新游戏
+    # 仅保留新游戏 (全量模式不过滤)
     new_items = [it for it in items if it["package_name"] not in existing]
     logger.info("APKCombo list: {} total, {} new", len(items), len(new_items))
     if not new_items:
         return []
-    new_items = await _enrich_with_detail_times(new_items, "apkcombo", max_enrich=20)
+    new_items = await _enrich_with_detail_times(new_items, "apkcombo", max_enrich=60)
     logger.info("APKCombo enriched: {} items", len(new_items))
     return new_items
 
 
-async def fetch_apkcombo_trending_updates():
-    """v3.4 增量: 逐页抓取, 遇到大量已知包名则提前终止."""
-    existing = _load_existing_packages("apkcombo")
-    existing.update(_load_existing_packages("apkcombo_trending"))
+async def fetch_apkcombo_trending_updates(full_refresh: bool = False):
+    """v3.4 增量: 逐页抓取, 遇到大量已知包名则提前终止.
+
+    v3.5: full_refresh=True 时不过滤已有包名 + 不提前终止, 避免并发竞争.
+    """
+    existing: set[str] = set()
+    if not full_refresh:
+        existing = _load_existing_packages("apkcombo")
+        existing.update(_load_existing_packages("apkcombo_trending"))
     items: list[dict] = []
     new_in_page = 999
     for page in range(1, 5):
-        if new_in_page < 3:  # 本页新数据 < 3 个 → 提前终止
+        if not full_refresh and new_in_page < 3:  # 本页新数据 < 3 个 → 提前终止 (全量模式不终止)
             logger.info("APKCombo trending page {} 仅 {} 个新数据, 提前终止", page - 1, new_in_page)
             break
         url = f"https://apkcombo.com/zh/category/game/latest-updates/?page={page}"
@@ -556,7 +570,7 @@ async def fetch_apkcombo_trending_updates():
         logger.info("APKCombo trending 无新数据")
         return []
     logger.info("APKCombo trending: {} new items, enriching...", len(items))
-    items = await _enrich_with_detail_times(items, "apkcombo", max_enrich=30)
+    items = await _enrich_with_detail_times(items, "apkcombo", max_enrich=90)
     logger.info("APKCombo trending enriched: {} items", len(items))
     return items
 
@@ -911,7 +925,9 @@ async def fetch_source_with_circuit_breaker(source, full_refresh: bool = False):
             "apkvision_updated": fetch_apkvision_updated,
             "apkvision_new": fetch_apkvision_new,
         }
-        if source == "apkpure":
+        # v3.5: apkpure/apkcombo/apkcombo_trending 均支持 full_refresh 参数
+        _full_refresh_sources = {"apkpure", "apkcombo", "apkcombo_trending"}
+        if source in _full_refresh_sources:
             items = await fn_map[source](full_refresh=full_refresh)
         else:
             items = await fn_map[source]()
