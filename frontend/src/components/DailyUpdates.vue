@@ -28,7 +28,7 @@
                 <template #default="{ row }">
                   <div class="game-name-cell">
                     <span class="game-name">{{ row.app_name }}</span>
-                    <span class="game-pkg">{{ row.package_name }}</span>
+                    <span class="game-pkg" @contextmenu.prevent="onContextMenu($event, row.package_name)">{{ row.package_name }}</span>
                   </div>
                 </template>
               </el-table-column>
@@ -70,7 +70,7 @@
                     <template #default="{ row }">
                       <div class="game-name-cell">
                         <span class="game-name">{{ row.app_name }}</span>
-                        <span class="game-pkg">{{ row.package_name }}</span>
+                        <span class="game-pkg" @contextmenu.prevent="onContextMenu($event, row.package_name)">{{ row.package_name }}</span>
                       </div>
                     </template>
                   </el-table-column>
@@ -96,8 +96,8 @@
               <div v-else class="empty-hint">暂无数据，等待后台抓取...</div>
             </el-tab-pane>
             <el-tab-pane label="🆕 最新更新" name="trending">
-              <div v-if="(data as any).apkcombo_trending?.length" class="table-grid">
-                <el-table v-for="(col, ci) in chunkItems((data as any).apkcombo_trending, 20)" :key="ci" :data="col" v-loading="loading" size="small" class="grid-table" empty-text="-">
+              <div v-if="data.apkcombo_trending.length" class="table-grid">
+                <el-table v-for="(col, ci) in chunkItems(data.apkcombo_trending, 20)" :key="ci" :data="col" v-loading="loading" size="small" class="grid-table" empty-text="-">
                   <el-table-column label="" width="40">
                     <template #default="{ row }">
                       <el-avatar v-if="row.icon_url" :src="row.icon_url" :size="36" shape="square" />
@@ -108,7 +108,7 @@
                     <template #default="{ row }">
                       <div class="game-name-cell">
                         <span class="game-name">{{ row.app_name }}</span>
-                        <span class="game-pkg">{{ row.package_name }}</span>
+                        <span class="game-pkg" @contextmenu.prevent="onContextMenu($event, row.package_name)">{{ row.package_name }}</span>
                       </div>
                     </template>
                   </el-table-column>
@@ -144,7 +144,7 @@
                 <template #default="{ row }">
                   <div class="game-name-cell">
                     <span class="game-name">{{ row.app_name }}</span>
-                    <span class="game-pkg">{{ row.package_name }}</span>
+                    <span class="game-pkg" @contextmenu.prevent="onContextMenu($event, row.package_name)">{{ row.package_name }}</span>
                   </div>
                 </template>
               </el-table-column>
@@ -184,7 +184,7 @@
                 <template #default="{ row }">
                   <div class="game-name-cell">
                     <span class="game-name">{{ row.app_name }}</span>
-                    <span class="game-pkg">{{ row.package_name }}</span>
+                    <span class="game-pkg" @contextmenu.prevent="onContextMenu($event, row.package_name)">{{ row.package_name }}</span>
                   </div>
                 </template>
               </el-table-column>
@@ -211,12 +211,18 @@
         </el-tab-pane>
       </el-tabs>
     </el-card>
+
+    <!-- 右键复制菜单 -->
+    <div v-if="ctxMenu.show" class="ctx-menu" :style="{ left: ctxMenu.x + 'px', top: ctxMenu.y + 'px' }" @mouseleave="hideMenu">
+      <div class="ctx-menu-item" @click="copyPkg">📋 复制包名</div>
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, reactive, onMounted, onUnmounted } from 'vue'
 import { Refresh } from '@element-plus/icons-vue'
+import { ElMessage } from 'element-plus'
 import { useAppStore } from '../stores/app'
 
 interface GameItem {
@@ -252,6 +258,29 @@ const lastFetchedAt = ref('')
 let pollTimer: number | null = null
 let lastModified: string | null = null
 
+// 右键复制菜单
+const ctxMenu = reactive({ show: false, x: 0, y: 0, pkg: '' })
+function onContextMenu(e: MouseEvent, pkg: string) {
+  ctxMenu.show = true
+  let mx = e.clientX + 4
+  let my = e.clientY + 4
+  // 防止溢出屏幕 (菜单 min-width: 140px + padding)
+  if (mx + 160 > window.innerWidth) mx = e.clientX - 160
+  if (my + 40 > window.innerHeight) my = e.clientY - 40
+  ctxMenu.x = mx
+  ctxMenu.y = my
+  ctxMenu.pkg = pkg
+}
+function copyPkg() {
+  navigator.clipboard.writeText(ctxMenu.pkg).then(() => {
+    ElMessage.success({ message: `已复制 ${ctxMenu.pkg}`, duration: 1500 })
+  }).catch(() => {
+    ElMessage.error('复制失败')
+  })
+  ctxMenu.show = false
+}
+function hideMenu() { ctxMenu.show = false }
+
 function chunkItems(items: GameItem[], size: number): GameItem[][] {
   const chunks: GameItem[][] = []
   for (let i = 0; i < items.length; i += size) {
@@ -267,6 +296,7 @@ async function fetchUpdates(force: boolean = false): Promise<void> {
     if (!force && lastModified) headers['If-Modified-Since'] = lastModified
     const resp = await fetch(`${store.apiBase}/api/daily-updates?limit=60`, { headers })
     if (resp.status === 304) return
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
     const json = await resp.json()
     data.value = json
     lastFetchedAt.value = json.last_fetched_at || ''
@@ -285,18 +315,34 @@ function resetPollTimer(ms: number): void {
   pollTimer = window.setInterval(() => fetchUpdates(), ms)
 }
 
-function refresh(): void {
-  fetchUpdates(true)
+async function refresh(): Promise<void> {
+  loading.value = true
+  try {
+    const resp = await fetch(`${store.apiBase}/api/daily-updates/refresh`, { method: 'POST' })
+    const result = await resp.json()
+    if (result.status === 'ok') {
+      ElMessage.success('刷新完成')
+    } else {
+      ElMessage.warning('刷新超时，稍后自动更新')
+    }
+    await fetchUpdates(true)
+  } catch {
+    fetchUpdates(true)
+  } finally {
+    loading.value = false
+  }
 }
 
 onMounted(async () => {
   await fetchUpdates()
   const intervalMs = (data.value.poll_interval || 300) * 1000
   pollTimer = window.setInterval(() => fetchUpdates(), intervalMs)
+  document.addEventListener('click', hideMenu)
 })
 
 onUnmounted(() => {
   if (pollTimer) clearInterval(pollTimer)
+  document.removeEventListener('click', hideMenu)
 })
 </script>
 
@@ -328,4 +374,24 @@ onUnmounted(() => {
 
 .empty-hint { text-align: center; padding: 40px 0; color: var(--text-muted); font-size: 14px; }
 .no-icon { color: var(--text-muted); font-size: 11px; }
+
+.game-pkg { cursor: context-menu; }
+
+.ctx-menu {
+  position: fixed; z-index: 9999;
+  background: var(--el-bg-color-overlay, #fff);
+  border: 1px solid var(--el-border-color-light, #e4e7ed);
+  border-radius: 8px; padding: 4px 0;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.25);
+  min-width: 140px;
+}
+.ctx-menu-item {
+  padding: 8px 16px; cursor: pointer;
+  font-size: 13px; white-space: nowrap;
+  color: var(--el-text-color-regular, #333);
+}
+.ctx-menu-item:hover {
+  background: var(--el-color-primary-light-9, #ecf5ff);
+  color: var(--el-color-primary, #409eff);
+}
 </style>

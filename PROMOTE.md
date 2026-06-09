@@ -1,145 +1,60 @@
-# 增加 APKVision 游戏更新/新游戏面板（仅取最近 20 条）- 设计文档 (v3.0 适配)
+# 任务：优化启动流程，实现“打开工具立即显示上次抓取的实时面板数据”
 
-## 一、需求概述
+## 背景
+当前系统 v3.2 的实时更新面板（APKPure/APKCombo/APKVision）数据由定时任务 `update_tracker.py` 每 30 分钟抓取一次并存入 `daily_updates` 表。前端 `/api/daily-updates` 接口直接从数据库读取数据。
 
-在“实时更新”选项卡中，为 **APKVision** 增加两个新的数据源：
+**问题**：在全新安装或数据库为空时，前端打开面板需要等待第一次抓取完成（约 10-30 秒）才能看到数据；即使数据库已有数据，启动时仍会先执行一次抓取，导致用户打开工具后需要等待几秒才能看到内容（如果抓取较慢）。
 
-- **最近更新游戏**（源：`https://apkvision.org/updated/`）
-- **新上线游戏**（源：`https://apkvision.org/games/`）
+**目标**：
+1. 实现“打开工具后立即显示上次抓取的数据（如果有）”，无需等待新抓取。
+2. 后台抓取任务正常进行，数据在后台更新，前端可轮询刷新。
 
-每个源仅抓取页面中自然排序的 **前 20 款游戏**（不分页），减少抓取复杂度和服务器负载。数据存储与 APKPure/APKCombo 共享 `daily_updates` 表，通过 `source` 字段区分（`apkvision_updated` 和 `apkvision_new`）。
+## 解决方案
 
-## 二、数据库与后端设计
+### 1. 修改 `backend/main.py` 的 `lifespan` 函数
 
-### 2.1 无需修改表结构
-
-现有 `daily_updates` 表已足够，只需约定两个新的 `source` 值。
-
-### 2.2 抓取函数（仅取前 20 条）
-
-复用 `http_client.stealth_get()` 绕过 Cloudflare，解析 HTML，并**截取前 20 条结果**。
-
-#### 2.2.1 最新更新游戏（`/updated/`）
-
-页面结构：游戏列表位于 `.main-news-grid` 中的 `.main-news` 元素。取前 20 个。
+- 将“首次抓取”改为 **不阻塞启动**（让数据库已有数据立即提供服务），但为了确保新安装时有数据，可以设置一个**轻量级预检**：如果数据库中没有数据，则同步等待首次抓取完成（带超时）。否则，直接跳过等待，让后台任务慢慢更新。
 
 ```python
-async def fetch_apkvision_updated() -> list[dict]:
-    url = "https://apkvision.org/updated/"
-    html = await stealth_get(url)
-    soup = BeautifulSoup(html, "html.parser")
-    items = []
-    articles = soup.select(".main-news-grid .main-news")[:20]   # 只取 20 条
-    for article in articles:
-        name_el = article.select_one(".main-news-title")
-        name = name_el.get_text(strip=True) if name_el else ""
-        version_els = article.select(".main-news-cat")
-        version = version_els[0].get_text(strip=True) if version_els else ""
-        href = article.get("href", "")
-        # 包名从 href 最后一段提取（如果存在）
-        package_name = href.rstrip("/").split("/")[-1] if href else name.lower().replace(" ", "_")
-        items.append({
-            "app_name": name,
-            "package_name": package_name,
-            "version_name": version,
-            "version_code": "",
-            "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        })
-    return items
-2.2.2 新上线游戏（/games/）
-该页面包含 Best New Games 区域（.mainb-grid .mainb-item）和下方列表（.main-news-grid .main-news）。合并两个区域，按页面顺序取前 20 条。
+# 在 lifespan 中
+from backend.cron.update_tracker import update_once, run_periodic_updates
+from backend.db.database import get_db_connection
 
-python
-async def fetch_apkvision_new() -> list[dict]:
-    url = "https://apkvision.org/games/"
-    html = await stealth_get(url)
-    soup = BeautifulSoup(html, "html.parser")
-    items = []
-    # 先取 Best New Games
-    for article in soup.select(".mainb-grid .mainb-item"):
-        name_el = article.select_one(".mainb-title")
-        if not name_el:
-            continue
-        name = name_el.get_text(strip=True)
-        version_els = article.select(".mainb-cat")
-        version = version_els[0].get_text(strip=True) if version_els else ""
-        href = article.get("href", "")
-        package_name = href.rstrip("/").split("/")[-1] if href else name.lower().replace(" ", "_")
-        items.append({
-            "app_name": name,
-            "package_name": package_name,
-            "version_name": version,
-            "version_code": "",
-            "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        })
-        if len(items) >= 20:
-            return items[:20]
-    # 若不足 20，再取下方普通列表
-    for article in soup.select(".main-news-grid .main-news"):
-        if len(items) >= 20:
-            break
-        name_el = article.select_one(".main-news-title")
-        name = name_el.get_text(strip=True) if name_el else ""
-        version_els = article.select(".main-news-cat")
-        version = version_els[0].get_text(strip=True) if version_els else ""
-        href = article.get("href", "")
-        package_name = href.rstrip("/").split("/")[-1] if href else name.lower().replace(" ", "_")
-        items.append({
-            "app_name": name,
-            "package_name": package_name,
-            "version_name": version,
-            "version_code": "",
-            "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        })
-    return items[:20]
-2.3 集成到定时任务
-在 update_tracker.py 的 update_once() 中并行抓取四个源：
+# 检查数据库是否有任何实时面板数据
+conn = get_db_connection()
+cursor = conn.cursor()
+cursor.execute("SELECT COUNT(*) FROM daily_updates")
+has_data = cursor.fetchone()[0] > 0
+conn.close()
 
-python
-async def update_once():
-    await asyncio.gather(
-        fetch_source_with_circuit_breaker("apkpure"),
-        fetch_source_with_circuit_breaker("apkcombo"),
-        fetch_source_with_circuit_breaker("apkvision_updated"),
-        fetch_source_with_circuit_breaker("apkvision_new"),
-        return_exceptions=True
-    )
-    set_last_modified(datetime.now())
-2.4 API 返回格式调整
-修改 /api/daily-updates 端点，将四个来源的数据分别放入 apkpure、apkcombo、apkvision_updated、apkvision_new 字段。前端按需展示。
+# 启动定时循环任务（后台）
+update_task = asyncio.create_task(run_periodic_updates())
 
-2.5 前端展示
-在 DailyUpdates.vue 中增加两个标签页：
+if not has_data:
+    # 首次运行无数据 → 等待首次抓取（最多 15 秒）
+    try:
+        await asyncio.wait_for(update_once(), timeout=15.0)
+        print("首次实时面板数据抓取完成")
+    except asyncio.TimeoutError:
+        print("首次抓取超时，面板可能暂时为空，后台继续")
+else:
+    # 已有数据 → 立即启动后台任务，不等待
+    asyncio.create_task(update_once())  # 非阻塞刷新
+2. 确保 /api/daily-updates 直接返回数据库内容
+该端点目前已经直接从 daily_updates 表查询并返回，无需修改。但要确保即使数据库为空也返回空列表（而非错误）。
 
-APKVision 最近更新
+3. 前端 DailyUpdates.vue 调整（可选）
+前端挂载时立即请求 /api/daily-updates，如果返回空数据且轮询尚未开始，可显示“暂无数据，稍后自动刷新”。不需要等待后端的首次抓取。
 
-APKVision 新游戏
+4. 验证行为
+全新环境（数据库为空）：启动后等待最多 15 秒完成首次抓取，前端请求会阻塞直到抓取完成（或超时）。之后面板有数据。
 
-表格列与现有保持一致：游戏名称、包名、版本名、版本号、更新时间。版本号字段可留空或显示“-”。
+已有数据的环境：启动后前端立即显示上次抓取的数据（几秒内），后台任务在 30 分钟后才更新数据，用户无感知。
 
-三、健壮性措施
-如果解析结果为空（少于 1 条），抛出异常，触发熔断，保留旧数据。
+交付物
+修改 backend/main.py 中的 lifespan 函数，按照上述逻辑实现。
 
-若 package_name 提取失败，使用游戏名称拼音化作为 fallback（不影响功能）。
+额外优化（可选）
+为了减少启动时的等待时间，可以将 update_once() 的重试次数降低，或仅抓取少量页面（例如 1 页）作为快速填充。
 
-使用 stealth_get() 自动处理 Cloudflare，无需额外配置。
-
-四、验收标准
-后端抓取 /updated/ 和 /games/ 页面，返回列表不超过 20 条。
-
-数据成功入库，source 分别为 apkvision_updated 和 apkvision_new。
-
-API 返回包含四个来源的数据。
-
-前端正确展示两个新标签页，数据不与其他源混淆。
-
-熔断、事务保护正常工作。
-
-五、交付物
-修改 backend/cron/update_tracker.py（新增两个抓取函数 + 调度）
-
-修改 backend/api/routes.py（扩展 API 返回字段）
-
-修改 frontend/src/components/DailyUpdates.vue（新增标签页）
-
-由于仅取 20 条，无需分页，代码更简洁，对服务器压力小。
+如果希望数据库为空时也立即返回空列表（不阻塞启动），可以去掉 if not has_data 中的 await，让后台任务异步填充。但这样用户首次打开会看到空面板，体验稍差。

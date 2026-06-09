@@ -12,13 +12,21 @@ import sys
 import time
 import threading
 import webbrowser
+import shutil
 from pathlib import Path
 
 
 def get_app_dir() -> Path:
-    """获取应用根目录（EXE 模式或开发模式）."""
+    """获取持久数据目录 (EXE 所在目录或开发目录)."""
     if getattr(sys, 'frozen', False):
-        return Path(sys._MEIPASS)
+        return Path(sys.executable).parent  # EXE 所在目录, 数据持久化
+    return Path(__file__).parent
+
+
+def get_bundle_dir() -> Path:
+    """获取 PyInstaller 打包资源目录 (chromium, 预置 config.json)."""
+    if getattr(sys, 'frozen', False):
+        return Path(sys._MEIPASS)  # 临时解压目录, 仅用于只读资源
     return Path(__file__).parent
 
 
@@ -54,20 +62,36 @@ def _setup_exit_handler():
 def main():
     import uvicorn
 
-    # 切换工作目录
+    # 切换工作目录 (EXE 所在目录, 数据持久化)
     app_dir = get_app_dir()
-    os.chdir(app_dir)
+    try:
+        os.chdir(app_dir)
+    except OSError as e:
+        print(f"[错误] 无法切换工作目录: {app_dir} — {e}")
+        sys.exit(1)
 
-    # Chromium 路径 (PyInstaller EXE 模式)
+    # EXE 模式: 首次运行复制预置 config.json, 指定 Chromium 路径
     if getattr(sys, 'frozen', False):
-        chromium_dir = app_dir / "chromium"
+        bundle_dir = get_bundle_dir()
+        chromium_dir = bundle_dir / "chromium"
         if chromium_dir.exists():
             os.environ['_CHROMIUM_CHECKED'] = '1'
 
+        # 复制预置 config.json (如果目标位置不存在)
+        bundle_config = bundle_dir / "config.json"
+        local_config = app_dir / "config.json"
+        if not local_config.exists() and bundle_config.exists():
+            try:
+                shutil.copy(bundle_config, local_config)
+            except OSError as e:
+                print(f"[警告] 复制 config.json 失败: {e}, 将使用默认配置")
+
     # 确保数据目录
-    Path("./data").mkdir(parents=True, exist_ok=True)
-    Path("./downloads").mkdir(parents=True, exist_ok=True)
-    Path("./logs").mkdir(parents=True, exist_ok=True)
+    for subdir in ("data", "downloads", "logs"):
+        try:
+            Path(f"./{subdir}").mkdir(parents=True, exist_ok=True)
+        except OSError as e:
+            print(f"[警告] 创建目录 ./{subdir} 失败: {e}")
 
     host = "127.0.0.1"
     port = 8000

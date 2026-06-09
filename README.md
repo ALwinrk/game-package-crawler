@@ -200,9 +200,49 @@ build_exe.bat
 | v2.8 | 全局 CSS 主题变量、UI 一致性优化、启动器完善 |
 | v3.0 | 实时更新游戏面板（APKPure/APKCombo）、下载重试+HEAD预检+架构识别、APKCombo分类过滤+50K+源、APKPure版本名提取、三列分栏布局、每日更新独立标签页、HTTP代理自动降级直连、速率限制(slowapi)、日志系统(loguru)、定时任务优雅停止 |
 | v3.1 | APKVision 实时更新面板（最近更新+新游戏各20条）、代理降级直连修复（传空dict替代None）、配置热更新原子性修复（先校验再写入）、前端保存错误处理（resp.ok检查） |
-| v3.2 | APKVision 面板包名提取修复：列表页 URL 为语义化 slug 不含包名，改为访问详情页从 Google Play 链接提取真实包名 + meta 标签提取精确更新时间 |
+| v3.2 | **启动优化**: 启动时检查 DB 缓存，有数据立即可用无需等待；无数据等待首次抓取最多 45s。**EXE 数据持久化**: launcher 工作目录从 _MEIPASS 临时目录改为 EXE 所在目录，DB/config/日志重启不丢失。**配置安全**: 热更新白名单移除敏感字段 + 数值类型校验。**手动刷新**: 按钮触发实际爬取并等待完成，3 分钟全量更新。**APKPure 优化**: 分类从 18→10 砍掉低价值分类，详情页增加 stealth 降级，批次间暂停防 CF 风控。**包名右键复制**: 所有面板支持右键弹出复制菜单。**标签页顺序**: 实时更新面板置顶为默认页。**前端**: 所有 fetch 增加 resp.ok 检查。 |
 
 详见: `版本总历史.md`、`系统工作流程\系统工作流程.md`
+
+## 已知问题与解决方案
+
+### 1. APKPure Cloudflare 风控（IP 被封）
+
+**现象**: 日志出现 `StealthySession timeout after 90s`、`turnstile version discovered is "interactive"`，APKPure 列表页/详情页全部返回空或被 CF 拦截。
+
+**原因**: Cloudflare 检测到高频爬取行为，对 IP 触发交互式 Turnstile 验证（需要真人点击），自动化工具无法绕过。
+
+**临时方案**:
+- 等待数小时，CF 封禁通常自动解除
+- 更换代理出口 IP（切换代理节点）
+- 在 `config.json` 中暂时移除 `apkpure` 避免继续触发封禁：`"enabled_sites": ["google_play", "apkcombo", "apkvision"]`
+- 调大更新间隔减少请求频率：`"update_check_interval": 7200`（2 小时）
+
+**长期方案**: 使用代理池轮换 IP，或对接住宅代理服务（brightdata、oxylabs 等）。
+
+### 2. 代理配置修改不生效
+
+**现象**: Settings 面板修改代理地址后保存失败或无效果。
+
+**原因**: v3.1 前端发送了 `download_path` 等非白名单字段，后端 422 拒绝整个请求。
+
+**解决**: v3.2 已修复——白名单移除敏感字段，非白名单键静默跳过而非报错。
+
+### 3. EXE 重启后数据丢失
+
+**现象**: 关闭 EXE 再打开，实时更新面板数据全部消失需重新爬取。
+
+**原因**: v3.1 及之前版本 `launcher.py` 将工作目录设为 PyInstaller 临时解压目录 `_MEIPASS`，进程退出即清理。
+
+**解决**: v3.2 已修复——工作目录改为 EXE 所在目录，数据持久化到 `data/crawler.db`。
+
+### 4. 服务器内存不足
+
+**现象**: 2GB 内存云服务器运行 EXE 出现内存不足。
+
+**原因**: Windows Server (~1.5GB) + Chromium headless × 2 (~600MB) + Python (~300MB) > 2GB。
+
+**解决**: 修改 `config.json`：`"playwright_concurrency": 0` 禁用浏览器，`"enabled_sites"` 移除 `apkmirror`。推荐配置 4GB+ 内存跑全套。
 
 ## 从旧版 (gvc v5) 迁移
 

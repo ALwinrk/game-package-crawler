@@ -85,25 +85,33 @@ class Settings(BaseSettings):
         "enabled_sites",
         "update_check_interval", "daily_updates_pages",
         "daily_updates_limit", "frontend_poll_interval",
-        "proxy"
+        "proxy",
+    }
+
+    # 数值型配置键 (需要类型校验和范围校验)
+    _NUMERIC_KEYS: set[str] = {
+        "scraper_concurrency", "playwright_concurrency", "batch_concurrency",
+        "download_concurrency", "download_chunk_size",
+        "retry_times", "retry_delay", "cache_ttl_seconds",
+        "request_timeout", "stealth_timeout",
+        "update_check_interval", "daily_updates_pages",
+        "daily_updates_limit", "frontend_poll_interval",
     }
 
     def update(self, changes: dict[str, Any]) -> None:
-        """运行时更新配置 — 仅白名单键可通过 API 修改.
-
-        敏感键 (download_path, google_play_cookie_path)
-        需要编辑 config.json 后重启应用, 通过 API 修改会被拒绝。
-        """
-        # 先校验全部字段，避免部分 setattr 后抛异常导致状态不一致
-        for key in changes:
-            if hasattr(self, key) and key not in self._HOT_UPDATE_WHITELIST:
-                raise ValueError(
-                    f"'{key}' 是敏感配置，需要编辑 config.json 后重启应用"
-                )
-        # 全部通过白名单校验后，批量写入
+        """运行时更新配置 — 仅白名单键可通过 API 修改, 非白名单键静默跳过."""
         for key, value in changes.items():
-            if key in self._HOT_UPDATE_WHITELIST and hasattr(self, key):
-                setattr(self, key, value)
+            if key not in self._HOT_UPDATE_WHITELIST or not hasattr(self, key):
+                continue
+            # 数值型字段: 类型转换 + 范围校验
+            if key in self._NUMERIC_KEYS:
+                try:
+                    value = type(getattr(self, key))(value)
+                except (ValueError, TypeError):
+                    continue
+                if isinstance(value, (int, float)) and value < 0:
+                    continue
+            setattr(self, key, value)
         self.save()
 
 

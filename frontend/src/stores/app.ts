@@ -73,7 +73,7 @@ export const useAppStore = defineStore('app', () => {
   }
 
   // ── 状态 ──
-  const activeTab = ref('search')
+  const activeTab = ref('daily')
   const loading = ref(false)
   const packageInput = ref('')
   const expectedVersion = ref('')
@@ -152,6 +152,7 @@ export const useAppStore = defineStore('app', () => {
           save_memo: true,
         }),
       })
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
       const data = await resp.json()
       results.value = [data as FetchResult]
     } catch (e: any) {

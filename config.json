@@ -8,7 +8,7 @@
   "retry_delay": 1.0,
   "batch_concurrency": 5,
   "cache_ttl_seconds": 300,
-  "proxy": "http://127.0.0.1:7897",
+  "proxy": "http://127.0.0.1:7892",
   "enabled_sites": [
     "google_play",
     "apkpure",
@@ -20,7 +20,7 @@
   "log_level": "INFO",
   "log_retention_days": 30,
   "request_timeout": 10.0,
-  "stealth_timeout": 60.0,
+  "stealth_timeout": 45.0,
   "update_check_interval": 1800,
   "daily_updates_pages": 3,
   "daily_updates_limit": 100,

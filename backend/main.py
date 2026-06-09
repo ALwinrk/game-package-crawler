@@ -110,9 +110,35 @@ async def lifespan(app: FastAPI):
 
     browser_task = asyncio.create_task(_init_browser_background())
 
-    # v3.0.1: 每日更新面板后台任务 (run_periodic_updates 内部会立即执行首次抓取)
-    from backend.cron.update_tracker import run_periodic_updates
+    # ── 每日更新面板后台任务 (v3.2: 启动时检查缓存, 避免新安装空白) ──
+
+    # 检查数据库是否已有实时面板数据
+    from backend.db.database import get_connection
+    from backend.cron.update_tracker import run_periodic_updates, get_last_modified
+
+    has_data = False
+    conn = get_connection()
+    try:
+        count = conn.execute("SELECT COUNT(*) FROM daily_updates").fetchone()[0]
+        has_data = count > 0
+    finally:
+        conn.close()
+
     update_task = asyncio.create_task(run_periodic_updates())
+
+    if not has_data:
+        # 全新安装无缓存数据 → 等待首次抓取完成 (最多 45s)
+        logger.info("数据库无缓存数据, 等待首次抓取 (最多 45s)...")
+        for _ in range(60):  # 60 × 0.75s = 45s
+            if get_last_modified() is not None:
+                break
+            await asyncio.sleep(0.75)
+        if get_last_modified() is not None:
+            logger.info("首次实时面板数据抓取完成")
+        else:
+            logger.warning("首次抓取超时, 面板可能暂时为空, 后台继续")
+    else:
+        logger.info("已有缓存数据 ({} 条), 面板立即可用", count)
 
     logger.info("代理: {}", settings.proxy or "未配置")
     logger.info("启用站点: {}", ", ".join(settings.enabled_sites))

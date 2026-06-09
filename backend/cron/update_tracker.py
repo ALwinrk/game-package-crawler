@@ -37,12 +37,11 @@ def get_last_modified() -> datetime | None:
         return _last_modified
 
 
+# v3.2: 砍掉低价值分类 (卡牌/赌场/知识问答/文字/音乐/益智/教育/桌面棋类)
 APKPURE_CATEGORIES = [
     "android-games", "action-games", "adventure-games", "arcade-games",
-    "board-games", "card-games", "casino-games", "casual-games",
-    "educational-games", "music-games", "puzzle-games", "racing-games",
-    "role-playing-games", "simulation-games", "sports-games",
-    "strategy-games", "trivia-games", "word-games",
+    "casual-games", "racing-games", "role-playing-games", "simulation-games",
+    "sports-games", "strategy-games",
 ]
 
 APKPURE_SELECTORS = {
@@ -240,13 +239,19 @@ def _parse_apkcombo_html(html: str) -> list[dict]:
 # ── 详情页抓取 (v2.8.2) ────────────────────────────────────
 
 async def _fetch_detail_time_apkpure(item: dict) -> dict:
-    """访问 APKPure 详情页获取真实更新时间."""
+    """访问 APKPure 详情页获取真实更新时间 (http_get → stealth 降级)."""
     async with _DETAIL_SEMAPHORE:
         detail_url = item.get("detail_url", "")
         if not detail_url:
             return item
         try:
             status, html = await http_get(detail_url)
+            # http_get 失败或疑似被 CF 拦截 → 降级 stealth_get
+            if status != 200 or len(html) < 1000:
+                logger.debug("APKPure detail http_get failed ({}) for {}, trying stealth...",
+                             status, detail_url[:60])
+                await asyncio.sleep(random.uniform(1.0, 2.5))
+                status, html = await stealth_get(detail_url)
             if status != 200 or len(html) < 1000:
                 logger.debug("APKPure detail page failed: {} HTTP {}", detail_url[:60], status)
                 return item
@@ -294,27 +299,31 @@ async def _fetch_detail_time_apkcombo(item: dict) -> dict:
 
 
 async def _enrich_with_detail_times(items: list[dict], source: str, max_enrich: int = 60) -> list[dict]:
-    """并发抓取详情页填充真实更新时间."""
+    """并发抓取详情页填充真实更新时间 (分批执行, 批次间暂停降低 CF 风控)."""
     if not items:
         return items
     fn = _fetch_detail_time_apkpure if source == "apkpure" else _fetch_detail_time_apkcombo
-    tasks = [fn(item) for item in items[:max_enrich]]
-    if tasks:
-        enriched = await asyncio.gather(*tasks, return_exceptions=True)
-        for i, result in enumerate(enriched):
+    targets = items[:max_enrich]
+    batch_size = 5
+    for batch_start in range(0, len(targets), batch_size):
+        batch = targets[batch_start:batch_start + batch_size]
+        tasks = [fn(item) for item in batch]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        for j, result in enumerate(results):
+            idx = batch_start + j
             if isinstance(result, dict):
-                items[i] = result
+                items[idx] = result
+        # 批次间暂停 (最后一批不加)
+        if batch_start + batch_size < len(targets):
+            await asyncio.sleep(random.uniform(2.0, 4.0))
     # 统计真实日期获取情况; 未获取到的条目保持 updated_at=None
-    enriched_count = sum(1 for item in items if item.get("updated_at"))
+    enriched_count = sum(1 for item in targets if item.get("updated_at"))
     logger.info("{} detail enrichment: {}/{} got real dates, {} missing",
-                source, enriched_count, min(len(items), max_enrich),
-                len(items) - enriched_count)
+                source, enriched_count, len(targets),
+                max(0, len(targets) - enriched_count))
     if enriched_count == 0:
-        # 全部失败, 用抓取时间兜底保证有数据显示
-        fallback = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        for item in items:
-            item["updated_at"] = fallback
-        logger.warning("{} all detail fetches failed, using fallback time", source)
+        # 全部失败 → 不覆盖旧数据, save_updates 会跳过 DELETE 保留上次结果
+        logger.warning("{} all detail fetches failed, keeping old data", source)
     return items
 
 
@@ -428,12 +437,12 @@ async def fetch_apkpure_updates():
             logger.debug("APKPure category {}: {} items ({} new)", cat, len(items), new_count)
         except Exception as exc:
             logger.warning("APKPure category {} error: {}", cat, exc)
-        await asyncio.sleep(random.uniform(0.8, 1.5))
+        await asyncio.sleep(random.uniform(2.5, 5.0))
     if not all_items:
         raise Exception("APKPure all categories parse empty")
     logger.info("APKPure list fetched: {} unique items from {} categories, enriching...",
                 len(all_items), len(APKPURE_CATEGORIES))
-    all_items = await _enrich_with_detail_times(all_items, "apkpure", max_enrich=200)
+    all_items = await _enrich_with_detail_times(all_items, "apkpure", max_enrich=80)
     logger.info("APKPure enriched: {} items", len(all_items))
     return all_items
 

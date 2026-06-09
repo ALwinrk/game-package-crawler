@@ -36,6 +36,15 @@
       <!-- 主体 -->
       <el-main class="app-main">
         <el-tabs v-model="store.activeTab" type="border-card" class="main-tabs">
+          <el-tab-pane name="daily">
+            <template #label>
+              <span class="tab-label">📰 实时更新</span>
+            </template>
+            <div class="tab-content animate-fade-in-scale">
+              <DailyUpdates />
+            </div>
+          </el-tab-pane>
+
           <el-tab-pane name="search">
             <template #label>
               <span class="tab-label">🔍 包名排查</span>
@@ -49,15 +58,6 @@
                 <p class="empty-text">输入包名，一键捉虫~</p>
                 <p class="empty-sub">支持 Google Play / APKPure / APKCombo / APKMirror / APKVision 五大源</p>
               </div>
-            </div>
-          </el-tab-pane>
-
-          <el-tab-pane name="daily">
-            <template #label>
-              <span class="tab-label">📰 实时更新</span>
-            </template>
-            <div class="tab-content animate-fade-in-scale">
-              <DailyUpdates />
             </div>
           </el-tab-pane>
 
@@ -120,6 +120,7 @@ const loadingDots = ref(0)
 async function checkReady() {
   try {
     const resp = await fetch(`${store.apiBase}/api/ready`)
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
     const data = await resp.json()
     if (data.status === 'ready') {
       backendReady.value = true

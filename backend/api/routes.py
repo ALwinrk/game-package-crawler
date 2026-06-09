@@ -670,6 +670,17 @@ async def daily_updates(
     return JSONResponse(content=result, headers=headers)
 
 
+@router.post("/daily-updates/refresh")
+async def trigger_daily_refresh():
+    """手动触发每日更新抓取 (等待完成, 最多 45s)."""
+    from backend.cron.update_tracker import update_once
+    try:
+        await asyncio.wait_for(update_once(), timeout=45.0)
+        return {"status": "ok", "message": "刷新完成"}
+    except asyncio.TimeoutError:
+        return {"status": "timeout", "message": "刷新超时，后台继续"}
+
+
 # ── WebSocket ──────────────────────────────────────────────
 
 _WS_ALLOWED_ORIGINS = {
