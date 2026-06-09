@@ -1,4 +1,4 @@
-"""游戏包名爬虫系统 v2.8 — 桌面启动器 (快速启动/关闭).
+"""游戏包名爬虫系统 v3.0 — 桌面启动器 (快速启动/关闭).
 
 双击运行: 启动后端服务 → 打开浏览器 → 等待退出 → 清理.
 """
@@ -22,12 +22,12 @@ def get_app_dir() -> Path:
     return Path(__file__).parent
 
 
-# ── 强制退出 (v2.8: 直接 os._exit, 不等待任何清理) ────
+# ── 强制退出 (v3.0: 直接 os._exit, 不等待任何清理) ────
 
 def _force_exit():
     """收到关闭信号时立即强制退出进程."""
     try:
-        print("\n[v2.8] 收到关闭信号，强制退出...")
+        print("\n[v3.0] 收到关闭信号，强制退出...")
     except Exception:
         pass
     os._exit(0)
@@ -79,10 +79,10 @@ def main():
 
     threading.Thread(target=open_browser, daemon=True).start()
 
-    # v2.8: 注册强制退出处理器
+    # v3.0: 注册强制退出处理器
     _setup_exit_handler()
 
-    print(f"游戏包名爬虫系统 v2.8")
+    print(f"游戏包名爬虫系统 v3.0")
     print(f"启动服务: http://{host}:{port}")
     print("-" * 50)
 
@@ -92,7 +92,7 @@ def main():
         port=port,
         log_level="info",
         access_log=False,
-        timeout_graceful_shutdown=2,  # v2.8: 秒级优雅关闭
+        timeout_graceful_shutdown=2,  # v3.0: 秒级优雅关闭
     )
 
 
