@@ -99,10 +99,12 @@ class BrowserManager:
     async def close_page(self, page, semaphore: asyncio.Semaphore):
         """关闭页面并释放信号量."""
         try:
-            await page.close()
-        except Exception:
-            pass
-        semaphore.release()
+            try:
+                await page.close()
+            except Exception:
+                pass
+        finally:
+            semaphore.release()
 
 
 # 全局单例

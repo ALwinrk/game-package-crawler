@@ -206,14 +206,18 @@ async function loadConfig() {
 async function saveConfig() {
   saving.value = true
   try {
-    await fetch(`${store.apiBase}/api/config`, {
+    const resp = await fetch(`${store.apiBase}/api/config`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(config),
     })
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({ detail: `HTTP ${resp.status}` }))
+      throw new Error(err.detail || `保存失败 (${resp.status})`)
+    }
     ElMessage.success({ message: '💾 设置已保存！', customClass: 'cyber-msg' })
-  } catch {
-    ElMessage.error({ message: '保存失败，检查下代理或网络吧~', customClass: 'cyber-msg' })
+  } catch (e: any) {
+    ElMessage.error({ message: e?.message || '保存失败，检查下代理或网络吧~', customClass: 'cyber-msg' })
   } finally {
     saving.value = false
   }

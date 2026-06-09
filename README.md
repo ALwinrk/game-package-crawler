@@ -1,38 +1,44 @@
-# 游戏包名爬虫系统 v3.0
+# 游戏包名爬虫系统 v3.2
 
-Android APK 版本排查工具 — FastAPI + Vue 3 前后端分离架构。支持 5 大站点并发查询、实时更新游戏面板（APKPure/APKCombo）、版本对比、内置异步下载（断点续传+重试+架构识别）、Excel 批量处理、记忆化输入。
+Android APK 版本排查工具 — FastAPI + Vue 3 前后端分离架构。支持 5 大站点并发查询、实时更新游戏面板（APKPure/APKCombo/APKVision）、版本对比、内置异步下载（断点续传+重试+架构识别）、Excel 批量处理、记忆化输入。
 
 ## 目录结构
 
 ```
-D:\game-package-crawler-proxy\
 ├── backend/                 # FastAPI 后端
-│   ├── main.py              # FastAPI 入口
+│   ├── main.py              # FastAPI 入口 + lifespan 管理
 │   ├── config.py            # pydantic 配置
+│   ├── logging_setup.py     # loguru 日志配置
 │   ├── api/                 # REST + WebSocket 路由
-│   │   └── routes.py
+│   │   ├── routes.py        # REST API 端点
+│   │   └── websocket.py     # WebSocket 进度推送
 │   ├── models/              # 数据模型 (Pydantic schemas)
 │   │   └── schemas.py
 │   ├── scrapers/            # 5 个站点爬虫
+│   │   ├── base.py          # 爬虫基类
 │   │   ├── google_play.py
 │   │   ├── apkpure.py
 │   │   ├── apkcombo.py
 │   │   ├── apkmirror.py
 │   │   └── apkvision.py
 │   ├── core/                # 核心库
-│   │   ├── http_client.py   # HTTP 客户端 (Scrapling + curl_cffi)
+│   │   ├── http_client.py   # HTTP 客户端 (Scrapling + curl_cffi, 代理降级)
 │   │   ├── parser.py        # HTML/JSON 解析
 │   │   ├── version.py       # 版本号提取与规范化
 │   │   ├── orchestrator.py  # 查询调度器 (快/慢源编排)
-│   │   └── cache.py         # TTL 爬虫缓存 + 慢任务存储
+│   │   ├── cache.py         # TTL 爬虫缓存 + 慢任务存储
+│   │   └── browser_manager.py # Playwright 浏览器池管理
 │   ├── download/            # 异步下载管理器
 │   │   ├── manager.py       # 下载队列+进度+重试+架构识别
 │   │   └── extractors.py    # URL 提取器
 │   ├── batch/               # 批量任务管理器
 │   │   └── manager.py       # 批量并发 (Semaphore 控制)
 │   ├── cron/                # 定时任务
-│   │   └── update_tracker.py # 实时更新游戏面板抓取
-│   └── db/                  # SQLite 数据库 + 记忆化
+│   │   └── update_tracker.py # 实时更新游戏面板抓取 + 优雅停止
+│   ├── db/                  # SQLite 数据库
+│   │   └── database.py
+│   └── memo/                # 记忆化输入存储
+│       └── store.py
 ├── frontend/                # Vue 3 + TypeScript + Element Plus
 │   ├── index.html
 │   ├── src/
@@ -45,17 +51,17 @@ D:\game-package-crawler-proxy\
 │   │   │   ├── ResultTable.vue      # 结果展示表格
 │   │   │   ├── BatchPanel.vue       # Excel 批量面板
 │   │   │   ├── DownloadQueue.vue    # 下载队列管理 (含架构标签)
-│   │   │   ├── DailyUpdates.vue     # 实时更新游戏面板
+│   │   │   ├── DailyUpdates.vue     # 实时更新游戏面板 (APKPure/APKCombo/APKVision)
 │   │   │   └── SettingsPanel.vue    # 设置面板 (代理/并发/站点)
 │   │   └── styles/
 │   │       └── global.css           # 全局样式 + 主题变量
-│   └── package.json (由 Electron/build 脚本管理)
 ├── tests/                   # 单元测试
 ├── launcher.py              # 桌面启动器 (一键启动后端+浏览器)
 ├── config.json              # 用户配置
 ├── requirements.txt         # Python 依赖
 ├── build.spec               # PyInstaller 打包配置
 ├── build_exe.bat            # 构建脚本
+├── deploy_server.bat        # 云服务器部署脚本
 └── README.md
 ```
 
@@ -78,7 +84,6 @@ python launcher.py
 **方式 B — 命令行启动后端**
 
 ```bash
-cd D:\game-package-crawler-proxy
 python -m uvicorn backend.main:app --host 127.0.0.1 --port 8000 --reload
 ```
 
@@ -122,15 +127,25 @@ python backend/main.py
 ```json
 {
   "download_path": "./downloads",
-  "scraper_concurrency": 4,
+  "scraper_concurrency": 6,
+  "playwright_concurrency": 2,
   "batch_concurrency": 5,
   "download_concurrency": 3,
   "cache_ttl_seconds": 300,
   "download_chunk_size": 1048576,
+  "request_timeout": 10.0,
+  "stealth_timeout": 60.0,
+  "retry_times": 2,
+  "retry_delay": 1.0,
   "proxy": "http://127.0.0.1:7897",
   "enabled_sites": ["google_play", "apkpure", "apkcombo", "apkmirror", "apkvision"],
-  "retry_times": 2,
-  "language": "zh"
+  "google_play_cookie_path": "",
+  "daily_updates_pages": 3,
+  "daily_updates_limit": 100,
+  "update_check_interval": 1800,
+  "frontend_poll_interval": 300,
+  "log_level": "INFO",
+  "log_retention_days": 30
 }
 ```
 
@@ -142,7 +157,7 @@ python backend/main.py
 | APKPure | Scrapling + JS 渲染 | 需要 | 绕过 Cloudflare |
 | APKCombo | Scrapling | 需要 | /api/app 302 跳转 |
 | APKMirror | Scrapling + Stealthy | 需要 | 多步跳转 |
-| APKVision | StealthySession | 不需要 | CF JS Challenge |
+| APKVision | StealthySession | 不需要 | CF JS Challenge，支持实时更新面板 |
 
 ## 运行测试
 
@@ -183,7 +198,9 @@ build_exe.bat
 | v2.6 | BatchPanel 重构、DownloadQueue 独立组件 |
 | v2.7 | SettingsPanel 重做、配置热更新 |
 | v2.8 | 全局 CSS 主题变量、UI 一致性优化、启动器完善 |
-| v3.0 | 实时更新游戏面板（APKPure/APKCombo）、下载重试+HEAD预检+架构识别、APKCombo分类过滤+50K+源、APKPure版本名提取、三列分栏布局、每日更新独立标签页 |
+| v3.0 | 实时更新游戏面板（APKPure/APKCombo）、下载重试+HEAD预检+架构识别、APKCombo分类过滤+50K+源、APKPure版本名提取、三列分栏布局、每日更新独立标签页、HTTP代理自动降级直连、速率限制(slowapi)、日志系统(loguru)、定时任务优雅停止 |
+| v3.1 | APKVision 实时更新面板（最近更新+新游戏各20条）、代理降级直连修复（传空dict替代None）、配置热更新原子性修复（先校验再写入）、前端保存错误处理（resp.ok检查） |
+| v3.2 | APKVision 面板包名提取修复：列表页 URL 为语义化 slug 不含包名，改为访问详情页从 Google Play 链接提取真实包名 + meta 标签提取精确更新时间 |
 
 详见: `版本总历史.md`、`系统工作流程\系统工作流程.md`
 

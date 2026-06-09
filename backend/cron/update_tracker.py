@@ -10,6 +10,7 @@ import random
 import re
 import threading
 from datetime import datetime, timezone, timedelta
+from urllib.parse import urlparse, parse_qs
 
 from bs4 import BeautifulSoup
 
@@ -317,6 +318,92 @@ async def _enrich_with_detail_times(items: list[dict], source: str, max_enrich: 
     return items
 
 
+# ── APKVision 详情页富化 (v3.2) ─────────────────────────────
+
+async def _enrich_apkvision_item(item: dict) -> dict | None:
+    """访问 APKVision 详情页, 提取包名 (Google Play 链接) 和真实更新时间."""
+    async with _DETAIL_SEMAPHORE:
+        detail_url = item.get("detail_url", "")
+        if not detail_url:
+            return None
+        try:
+            status, html = await http_get(detail_url)
+            if status != 200 or len(html) < 1000:
+                logger.debug("APKVision detail page failed: {} HTTP {}", detail_url[:60], status)
+                # 保留列表页数据, 用抓取时间兜底
+                item["updated_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                return item
+            soup = BeautifulSoup(html, "html.parser")
+
+            # 1. 从 Google Play 链接提取包名
+            gp_link = soup.select_one("a[href*='play.google.com/store/apps/details?id=']") or \
+                      soup.select_one("a[href*='google.com/store/apps/details?id=']")
+            if gp_link:
+                href = gp_link.get("href", "")
+                # href 格式: https://play.google.com/store/apps/details?id=com.xxx.yyy&ref=...
+                parsed = urlparse(href)
+                qs = parse_qs(parsed.query)
+                pkg_list = qs.get("id", [])
+                if pkg_list and _PKG_RE.match(pkg_list[0]):
+                    item["package_name"] = pkg_list[0]
+                else:
+                    # 尝试从 path 提取: /store/apps/details?id=com.xxx.yyy
+                    if "id=" in parsed.path:
+                        pkg = parsed.path.split("id=")[-1].split("&")[0]
+                        if _PKG_RE.match(pkg):
+                            item["package_name"] = pkg
+
+            # 2. 从 meta 标签提取真实更新时间
+            for meta_prop in ("article:modified_time", "article:published_time"):
+                meta = soup.select_one(f"meta[property='{meta_prop}']")
+                if meta and meta.get("content"):
+                    try:
+                        dt = datetime.fromisoformat(meta["content"].replace("Z", "+00:00"))
+                        item["updated_at"] = dt.strftime("%Y-%m-%d %H:%M:%S")
+                        break
+                    except (ValueError, TypeError):
+                        continue
+
+            # 3. 如果没拿到真实时间, 用抓取时间兜底
+            if not item.get("updated_at"):
+                item["updated_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        except asyncio.TimeoutError:
+            logger.debug("APKVision detail page timeout: {}", detail_url[:60])
+            item["updated_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        except Exception as exc:
+            logger.debug("APKVision detail page error: {} — {}", detail_url[:60], exc)
+            item["updated_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        return item
+
+
+async def _enrich_apkvision_items(items: list[dict], max_enrich: int = 40) -> list[dict]:
+    """并发抓取 APKVision 详情页, 填充包名和真实更新时间."""
+    if not items:
+        return items
+    tasks = [_enrich_apkvision_item(item) for item in items[:max_enrich]]
+    enriched: list[dict] = []
+    if tasks:
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        for result in results:
+            if isinstance(result, dict):
+                # 只保留成功提取到包名的条目
+                if result.get("package_name") and _PKG_RE.match(result["package_name"]):
+                    enriched.append(result)
+                else:
+                    logger.debug("APKVision item dropped: no valid package_name (url={})",
+                                 result.get("detail_url", "")[:60])
+
+    # 统计
+    with_time = sum(1 for it in enriched if it.get("updated_at"))
+    logger.info("APKVision detail enrichment: {}/{} items with package, {} with real dates",
+                len(enriched), min(len(items), max_enrich), with_time)
+    if not enriched:
+        logger.warning("APKVision all detail fetches returned no valid items")
+    return enriched
+
+
 # ── 列表页抓取 ──────────────────────────────────────────────
 
 async def fetch_apkpure_updates():
@@ -406,6 +493,111 @@ async def fetch_apkcombo_trending_updates():
     logger.info("APKCombo trending fetched: {} items, enriching...", len(items))
     items = await _enrich_with_detail_times(items, "apkcombo", max_enrich=90)
     logger.info("APKCombo trending enriched: {} items", len(items))
+    return items
+
+
+# ── APKVision 抓取 (v3.1) ─────────────────────────────────
+
+async def fetch_apkvision_updated():
+    """抓取 APKVision 最近更新页面: /updated/ (仅取前 20 条).
+
+    v3.2: APKVision 列表页 URL 使用语义化 slug (非包名), 需访问详情页
+    提取 Google Play 链接获取真实包名 + 精确更新时间.
+    """
+    url = "https://apkvision.org/updated/"
+    status, html = await _fetch_page(url)
+    if status != 200 or len(html) < 500:
+        raise Exception(f"APKVision updated page failed: HTTP {status}")
+    soup = BeautifulSoup(html, "html.parser")
+    items: list[dict] = []
+    for article in soup.select(".main-news-grid .main-news")[:20]:
+        name_el = article.select_one(".main-news-title")
+        app_name = name_el.get_text(strip=True) if name_el else ""
+        if not app_name or len(app_name) < 2:
+            continue
+        cat_els = article.select(".main-news-cat")
+        version_name = cat_els[0].get_text(strip=True) if cat_els else ""
+        link_el = article if article.name == "a" else article.select_one("a[href]")
+        href = _extract_attr(link_el, "href") if link_el else ""
+        if not href:
+            continue
+        detail_url = href if href.startswith("http") else f"https://apkvision.org{href}"
+        icon_url = _extract_icon(article, ["img.lazy", "img[data-src]", "img[src]"])
+        items.append({
+            "icon_url": icon_url,
+            "app_name": app_name,
+            "package_name": "",  # 待详情页填充
+            "detail_url": detail_url,
+            "download_count": "",
+            "version_name": version_name,
+            "updated_at": None,
+        })
+    if not items:
+        raise Exception("APKVision updated parse empty, page structure may have changed")
+    logger.info("APKVision updated list: {} items, enriching details...", len(items))
+    items = await _enrich_apkvision_items(items)
+    if not items:
+        raise Exception("APKVision updated: all items dropped after detail enrichment")
+    logger.info("APKVision updated enriched: {} items", len(items))
+    return items
+
+
+async def fetch_apkvision_new():
+    """抓取 APKVision 新游戏页面: /games/ (Best New Games + 普通列表, 仅取前 20 条).
+
+    v3.2: APKVision 列表页 URL 使用语义化 slug (非包名), 需访问详情页
+    提取 Google Play 链接获取真实包名 + 精确更新时间.
+    """
+    url = "https://apkvision.org/games/"
+    status, html = await _fetch_page(url)
+    if status != 200 or len(html) < 500:
+        raise Exception(f"APKVision new games page failed: HTTP {status}")
+    soup = BeautifulSoup(html, "html.parser")
+    items: list[dict] = []
+    seen_urls: set[str] = set()  # URL 去重 (列表页无包名, 用详情 URL 去重)
+
+    def _parse_articles(article_list):
+        for article in article_list:
+            if len(items) >= 20:
+                return
+            name_el = article.select_one(".mainb-title") or article.select_one(".main-news-title")
+            app_name = name_el.get_text(strip=True) if name_el else ""
+            if not app_name or len(app_name) < 2:
+                continue
+            cat_els = article.select(".mainb-cat") or article.select(".main-news-cat")
+            version_name = cat_els[0].get_text(strip=True) if cat_els else ""
+            link_el = article if article.name == "a" else article.select_one("a[href]")
+            href = _extract_attr(link_el, "href") if link_el else ""
+            if not href:
+                continue
+            detail_url = href if href.startswith("http") else f"https://apkvision.org{href}"
+            if detail_url in seen_urls:
+                continue
+            seen_urls.add(detail_url)
+            icon_url = _extract_icon(article, ["img.lazy", "img[data-src]", "img[src]"])
+            items.append({
+                "icon_url": icon_url,
+                "app_name": app_name,
+                "package_name": "",  # 待详情页填充
+                "detail_url": detail_url,
+                "download_count": "",
+                "version_name": version_name,
+                "updated_at": None,
+            })
+
+    # 先取 Best New Games (.mainb-grid .mainb-item)
+    _parse_articles(soup.select(".mainb-grid .mainb-item"))
+    # 若不足 20，再取下方普通列表 (.main-news-grid .main-news)
+    if len(items) < 20:
+        _parse_articles(soup.select(".main-news-grid .main-news"))
+
+    if not items:
+        raise Exception("APKVision new games parse empty, page structure may have changed")
+    logger.info("APKVision new games list: {} items, enriching details...", len(items))
+    items = await _enrich_apkvision_items(items)
+    if not items:
+        raise Exception("APKVision new games: all items dropped after detail enrichment")
+    logger.info("APKVision new games enriched: {} items", len(items))
     return items
 
 
@@ -537,6 +729,8 @@ async def fetch_source_with_circuit_breaker(source):
             "apkpure": fetch_apkpure_updates,
             "apkcombo": fetch_apkcombo_updates,
             "apkcombo_trending": fetch_apkcombo_trending_updates,
+            "apkvision_updated": fetch_apkvision_updated,
+            "apkvision_new": fetch_apkvision_new,
         }
         items = await fn_map[source]()
         if not items:
@@ -553,6 +747,8 @@ async def update_once():
         fetch_source_with_circuit_breaker("apkpure"),
         fetch_source_with_circuit_breaker("apkcombo"),
         fetch_source_with_circuit_breaker("apkcombo_trending"),
+        fetch_source_with_circuit_breaker("apkvision_updated"),
+        fetch_source_with_circuit_breaker("apkvision_new"),
         return_exceptions=True,
     )
     set_last_modified(datetime.now(timezone.utc))
@@ -561,14 +757,22 @@ async def update_once():
 async def run_periodic_updates():
     try:
         await update_once()
+    except asyncio.CancelledError:
+        raise
     except Exception as e:
         logger.error("initial update failed: {}", e)
     while True:
         settings = get_settings()
         interval = getattr(settings, "update_check_interval", 1800)
-        await asyncio.sleep(interval)
+        try:
+            await asyncio.sleep(interval)
+        except asyncio.CancelledError:
+            break
         try:
             await update_once()
             logger.info("daily updates panel refreshed")
+        except asyncio.CancelledError:
+            raise
         except Exception as e:
             logger.error("periodic update error: {}", e)
+    logger.info("每日更新面板后台任务已停止")

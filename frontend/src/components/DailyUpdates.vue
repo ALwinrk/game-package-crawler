@@ -129,6 +129,86 @@
             </el-tab-pane>
           </el-tabs>
         </el-tab-pane>
+
+        <!-- APKVision 最近更新 -->
+        <el-tab-pane label="APKVision 最近更新" name="apkvision_updated">
+          <div v-if="data.apkvision_updated.length" class="table-grid">
+            <el-table v-for="(col, ci) in chunkItems(data.apkvision_updated, 20)" :key="ci" :data="col" v-loading="loading" size="small" class="grid-table" empty-text="-">
+              <el-table-column label="" width="40">
+                <template #default="{ row }">
+                  <el-avatar v-if="row.icon_url" :src="row.icon_url" :size="36" shape="square" />
+                  <span v-else class="no-icon">-</span>
+                </template>
+              </el-table-column>
+              <el-table-column label="游戏名称" min-width="100" show-overflow-tooltip>
+                <template #default="{ row }">
+                  <div class="game-name-cell">
+                    <span class="game-name">{{ row.app_name }}</span>
+                    <span class="game-pkg">{{ row.package_name }}</span>
+                  </div>
+                </template>
+              </el-table-column>
+              <el-table-column label="版本" width="85">
+                <template #default="{ row }">
+                  <span v-if="row.version_name" class="version-text">{{ row.version_name }}</span>
+                  <span v-else class="no-icon">-</span>
+                </template>
+              </el-table-column>
+              <el-table-column label="更新" width="95">
+                <template #default="{ row }">
+                  <span class="update-time">{{ row.updated_at }}</span>
+                </template>
+              </el-table-column>
+              <el-table-column label="" width="44" align="center">
+                <template #default="{ row }">
+                  <a v-if="row.detail_url" :href="row.detail_url" target="_blank" class="detail-link" title="打开详情页">🔗</a>
+                  <span v-else class="no-icon">-</span>
+                </template>
+              </el-table-column>
+            </el-table>
+          </div>
+          <div v-else class="empty-hint">暂无数据，等待后台抓取...</div>
+        </el-tab-pane>
+
+        <!-- APKVision 新游戏 -->
+        <el-tab-pane label="APKVision 新游戏" name="apkvision_new">
+          <div v-if="data.apkvision_new.length" class="table-grid">
+            <el-table v-for="(col, ci) in chunkItems(data.apkvision_new, 20)" :key="ci" :data="col" v-loading="loading" size="small" class="grid-table" empty-text="-">
+              <el-table-column label="" width="40">
+                <template #default="{ row }">
+                  <el-avatar v-if="row.icon_url" :src="row.icon_url" :size="36" shape="square" />
+                  <span v-else class="no-icon">-</span>
+                </template>
+              </el-table-column>
+              <el-table-column label="游戏名称" min-width="100" show-overflow-tooltip>
+                <template #default="{ row }">
+                  <div class="game-name-cell">
+                    <span class="game-name">{{ row.app_name }}</span>
+                    <span class="game-pkg">{{ row.package_name }}</span>
+                  </div>
+                </template>
+              </el-table-column>
+              <el-table-column label="版本" width="85">
+                <template #default="{ row }">
+                  <span v-if="row.version_name" class="version-text">{{ row.version_name }}</span>
+                  <span v-else class="no-icon">-</span>
+                </template>
+              </el-table-column>
+              <el-table-column label="更新" width="95">
+                <template #default="{ row }">
+                  <span class="update-time">{{ row.updated_at }}</span>
+                </template>
+              </el-table-column>
+              <el-table-column label="" width="44" align="center">
+                <template #default="{ row }">
+                  <a v-if="row.detail_url" :href="row.detail_url" target="_blank" class="detail-link" title="打开详情页">🔗</a>
+                  <span v-else class="no-icon">-</span>
+                </template>
+              </el-table-column>
+            </el-table>
+          </div>
+          <div v-else class="empty-hint">暂无数据，等待后台抓取...</div>
+        </el-tab-pane>
       </el-tabs>
     </el-card>
   </div>
@@ -153,12 +233,18 @@ interface DailyData {
   apkpure: GameItem[]
   apkcombo: GameItem[]
   apkcombo_trending: GameItem[]
+  apkvision_updated: GameItem[]
+  apkvision_new: GameItem[]
   poll_interval: number
   last_fetched_at?: string
 }
 
 const store = useAppStore()
-const data = ref<DailyData>({ apkpure: [], apkcombo: [], apkcombo_trending: [], poll_interval: 300 })
+const data = ref<DailyData>({
+  apkpure: [], apkcombo: [], apkcombo_trending: [],
+  apkvision_updated: [], apkvision_new: [],
+  poll_interval: 300
+})
 const loading = ref(false)
 const activeSource = ref('apkpure')
 const comboTab = ref('popular')

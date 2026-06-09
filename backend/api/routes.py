@@ -590,7 +590,10 @@ async def config_get():
 @router.patch("/config")
 async def config_update(data: dict[str, Any]):
     settings = get_settings()
-    settings.update(data)
+    try:
+        settings.update(data)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
     reload_settings()
     return {"ok": True}
 
@@ -613,7 +616,7 @@ async def daily_updates(
     source: str = Query(None),
     limit: int = Query(20),
 ):
-    """获取 APKPure/APKCombo 最近更新游戏列表, 支持条件请求."""
+    """获取 APKPure/APKCombo/APKVision 最近更新游戏列表, 支持条件请求."""
     from backend.cron.update_tracker import get_last_modified
     from backend.db.database import get_connection as _get_conn
 
@@ -631,7 +634,7 @@ async def daily_updates(
     conn = _get_conn()
     try:
         result: dict = {}
-        for src in ("apkpure", "apkcombo", "apkcombo_trending"):
+        for src in ("apkpure", "apkcombo", "apkcombo_trending", "apkvision_updated", "apkvision_new"):
             if source and source != src:
                 continue
             sql = (

@@ -141,6 +141,11 @@ a = Analysis(
         "pydantic_core",
         # Version
         "packaging",
+        # Rate limiting
+        "slowapi",
+        "slowapi.util",
+        "slowapi.errors",
+        "limits",
         # Logging
         "loguru",
         # Backend modules

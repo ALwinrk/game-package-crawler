@@ -188,30 +188,52 @@ def _get_fetcher():
 
 
 def _http_get_sync(url: str) -> tuple[int, str]:
-    """同步 HTTP GET — Scrapling Fetcher (curl_cffi + browserforge)."""
+    """同步 HTTP GET — Scrapling Fetcher (curl_cffi + browserforge).
+
+    带代理时若代理不可用自动降级为直连请求。
+    """
     settings = get_settings()
     proxies = _get_proxy_dict()
 
-    try:
+    def _do_fetch(proxies_override=None):
         fetcher = _get_fetcher()
-        resp = fetcher.get(
+        return fetcher.get(
             url,
             timeout=int(settings.request_timeout),
-            retries=settings.retry_times,
+            retries=0 if proxies_override is not None else settings.retry_times,
             retry_delay=settings.retry_delay,
             impersonate="chrome124",
             stealthy_headers=True,
-            proxies=proxies,
+            proxies=proxies_override if proxies_override is not None else proxies,
             headers={"Accept-Language": "zh-CN,zh;q=0.9"},
         )
+
+    def _check_response(resp) -> tuple[int, str]:
         if resp.status == 200 and len(resp.html_content) > 500:
             return resp.status, resp.html_content
         if resp.status == 403 and is_cloudflare_block(resp.html_content):
             return 0, f"Cloudflare blocked: {urlparse(url).hostname}"
         return resp.status, resp.html_content or ""
+
+    try:
+        resp = _do_fetch()
+        return _check_response(resp)
     except Exception as e:
+        err_msg = f"{type(e).__name__}: {e!s}"[:120]
+        # 代理连接失败 → 降级直连重试一次
+        if proxies and ("connect to 127.0.0.1" in str(e).lower()
+                        or "connect to localhost" in str(e).lower()
+                        or "proxy" in str(e).lower()
+                        or "curl: (7)" in str(e)):
+            logger.info("代理不可用 {}，降级为直连: {}", settings.proxy, url[:60])
+            try:
+                resp = _do_fetch(proxies_override={})
+                return _check_response(resp)
+            except Exception as e2:
+                logger.warning("Fetcher error (直连) for {}: {}", url[:60], e2)
+                return 0, f"{type(e2).__name__}: {e2!s}"[:80]
         logger.warning("Fetcher error for {}: {}", url[:60], e)
-        return 0, f"{type(e).__name__}: {e!s}"[:80]
+        return 0, err_msg[:80]
 
 
 async def http_get(url: str) -> tuple[int, str]:

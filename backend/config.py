@@ -85,21 +85,25 @@ class Settings(BaseSettings):
         "enabled_sites",
         "update_check_interval", "daily_updates_pages",
         "daily_updates_limit", "frontend_poll_interval",
+        "proxy"
     }
 
     def update(self, changes: dict[str, Any]) -> None:
         """运行时更新配置 — 仅白名单键可通过 API 修改.
 
-        敏感键 (proxy, download_path, google_play_cookie_path)
-        需要重启应用生效, 通过 API 修改会被拒绝。
+        敏感键 (download_path, google_play_cookie_path)
+        需要编辑 config.json 后重启应用, 通过 API 修改会被拒绝。
         """
-        for key, value in changes.items():
-            if key in self._HOT_UPDATE_WHITELIST and hasattr(self, key):
-                setattr(self, key, value)
-            elif hasattr(self, key) and key not in self._HOT_UPDATE_WHITELIST:
+        # 先校验全部字段，避免部分 setattr 后抛异常导致状态不一致
+        for key in changes:
+            if hasattr(self, key) and key not in self._HOT_UPDATE_WHITELIST:
                 raise ValueError(
                     f"'{key}' 是敏感配置，需要编辑 config.json 后重启应用"
                 )
+        # 全部通过白名单校验后，批量写入
+        for key, value in changes.items():
+            if key in self._HOT_UPDATE_WHITELIST and hasattr(self, key):
+                setattr(self, key, value)
         self.save()
 
 
