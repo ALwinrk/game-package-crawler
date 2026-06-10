@@ -52,16 +52,17 @@ APKPURE_SELECTORS = {
 }
 
 # 排除关键词: 休闲益智/纸牌/赌场/音乐/知识问答/文字/教育类游戏
-_APKCOMBO_EXCLUDE_KEYWORDS = [
+_GAME_EXCLUDE_KEYWORDS = [
     "solitaire", "puzzle", "word", "trivia", "quiz", "casino", "bingo",
     "mahjong", "sudoku", "domino", "card", "poker", "slot", "roulette",
     "blackjack", "ludo", "chess", "checkers", "board", "music", "piano",
     "coloring", "drawing", "painting", "educational", "kids", "baby",
     "coloring book", "match 3", "merge", "dress up", "makeover",
     "接龙", "纸牌", "拼图", "填字", "数独", "麻将", "音乐", "涂色",
+    "棋牌", "博彩", "赌场", "彩票", "斗地主", "德扑",
 ]
-_APKCOMBO_EXCLUDE_KEYWORDS.extend([
-    s.capitalize() for s in _APKCOMBO_EXCLUDE_KEYWORDS
+_GAME_EXCLUDE_KEYWORDS.extend([
+    s.capitalize() for s in _GAME_EXCLUDE_KEYWORDS
 ])
 
 APKCOMBO_SELECTORS = {
@@ -166,6 +167,10 @@ def _parse_apkpure_html(html: str) -> list[dict]:
         for suffix in (" APK", " APKs", " MOD APK", " XAPK"):
             if app_name.endswith(suffix):
                 app_name = app_name[:-len(suffix)].strip()
+        # v3.6: 关键词过滤 — 排除棋牌/赌场/休闲/益智/知识问答/音乐/教育类游戏
+        app_lower = app_name.lower()
+        if any(kw in app_lower for kw in _GAME_EXCLUDE_KEYWORDS):
+            continue
         detail_url = detail_href if detail_href.startswith("http") else f"https://apkpure.net{detail_href}"
         # 版本名: .info-sdk 文本如 "2.135.3 by Aniplex Inc."，取 " by" 之前的部分
         ver_el = item.select_one(".info-sdk")
@@ -231,7 +236,7 @@ def _parse_apkcombo_html(html: str) -> list[dict]:
             continue
         # 过滤: 排除休闲/益智/纸牌类游戏
         app_lower = app_name.lower()
-        if any(kw in app_lower for kw in _APKCOMBO_EXCLUDE_KEYWORDS):
+        if any(kw in app_lower for kw in _GAME_EXCLUDE_KEYWORDS):
             continue
         detail_url = href if href.startswith("http") else f"https://apkcombo.com{href}"
         icon_url = _extract_icon(link, APKCOMBO_SELECTORS["icon"])
@@ -563,7 +568,7 @@ async def fetch_apkcombo_trending_updates(full_refresh: bool = False):
             if not app_name:
                 continue
             app_lower = app_name.lower()
-            if any(kw in app_lower for kw in _APKCOMBO_EXCLUDE_KEYWORDS):
+            if any(kw in app_lower for kw in _GAME_EXCLUDE_KEYWORDS):
                 continue
             existing.add(pkg)
             detail_url = href if href.startswith("http") else f"https://apkcombo.com{href}"

@@ -30,5 +30,7 @@
   "apkcombo_display_limit": 60,
   "apkcombo_trending_display_limit": 90,
   "apkvision_display_limit": 40,
-  "apkvision_new_display_limit": 40
+  "apkvision_new_display_limit": 40,
+  "notice_enabled": true,
+  "notice_text": "<strong>下载功能暂不可用</strong> &nbsp;|&nbsp; 首次加载请点击<strong>「全量刷新」</strong>初始化数据 &nbsp;|&nbsp; 实时游戏面板<strong>每小时自动爬取</strong>，点击<strong>「刷新面板」</strong>即可获取最新 &nbsp;|&nbsp; 🐛 反馈 Bug：<a href=\"mailto:1522597678@qq.com\">1522597678@qq.com</a>"
 }

@@ -60,6 +60,10 @@ class Settings(BaseSettings):
     apkvision_display_limit: int = 40    # v3.5: APKVision Updated 面板展示条数
     apkvision_new_display_limit: int = 40     # v3.5: APKVision New 面板展示条数
 
+    # ── 系统公告 (v3.6) ──────────────────────
+    notice_enabled: bool = False
+    notice_text: str = ""
+
     class Config:
         env_prefix = "CRAWLER_"
         env_file = ".env"
@@ -95,6 +99,7 @@ class Settings(BaseSettings):
         "apkcombo_display_limit", "apkcombo_trending_display_limit",
         "apkvision_display_limit", "apkvision_new_display_limit",
         "proxy",
+        "notice_enabled", "notice_text",
     }
 
     # 数值型配置键 (需要类型校验和范围校验)

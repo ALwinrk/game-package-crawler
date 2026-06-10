@@ -140,7 +140,7 @@ def main():
     # v3.0: 注册强制退出处理器
     _setup_exit_handler()
 
-    print(f"游戏包名爬虫系统 v3.4")
+    print(f"游戏包名爬虫系统 v3.6")
     print(f"启动服务: http://{host}:{port}")
     print(f"工作目录: {os.getcwd()}")
     print("-" * 50)

@@ -142,12 +142,22 @@ class ApkpureScraper(BaseScraper):
     def _extract_whats_new(self, html: str) -> str | None:
         """从 APKPure 详情页提取更新内容.
 
-        v3.5 策略 (apkpure.net 适配):
-        1. .whats-new 或 [class*='whats-new'] 元素内容
-        2. .whats-new-container 内的 p.text 段落 (apkpure.com 旧版)
-        3. .show-more-content 回退
-        4. data-dt-whatsnew 属性 (fallback)
+        v3.6 策略 (apkpure.net 适配):
+        0. .whats-new-content 叶子 div (实际更新内容所在, 最优先)
+        1. .whats-new 或 [class*='whats-new'] 元素内容 → p.text 段落
+        2. .show-more-content 回退
+        3. data-dt-whatsnew 属性 (fallback)
         """
+        # 策略 0: .whats-new-content — apkpure.net 实际更新内容的叶子 div
+        wn_content = _re.search(
+            r'<div[^>]*class="[^"]*whats-new-content[^"]*"[^>]*>(.*?)</div>',
+            html, _re.DOTALL | _re.IGNORECASE,
+        )
+        if wn_content:
+            content = self._clean_html(wn_content.group(1).strip())
+            if content and len(content) > 20:
+                return content
+
         # 策略 1: .whats-new 元素 (apkpure.net 标准)
         for sel in (r'<div[^>]*class="[^"]*whats-new[^"]*"[^>]*>(.*?)</div>',
                      r'<div[^>]*class="[^"]*whats-new-container[^"]*"[^>]*>(.*?)</div>\s*(?:</div>)?\s*</div>\s*</div>'):
@@ -161,9 +171,19 @@ class ApkpureScraper(BaseScraper):
                 if not parts:
                     content = self._clean_html(m.group(1).strip())
                     if content and len(content) > 30:
-                        # 去掉 "最新版本X.X.X的更新日志" 前缀
+                        # 去掉中英文标题前缀和日期行
                         content = _re.sub(r'^最新版本[\d.]+的更新日志\s*', '', content)
-                        return content
+                        content = _re.sub(
+                            r"^What'?s new in the latest [\d.]+\s*",
+                            '', content, flags=_re.IGNORECASE,
+                        )
+                        content = _re.sub(
+                            r'^Last updated on [\d\-]+\s*',
+                            '', content, flags=_re.IGNORECASE,
+                        )
+                        content = content.strip()
+                        if content and len(content) > 15:
+                            return content
                 if parts:
                     result = '\n'.join(parts)
                     if len(result) > 30:

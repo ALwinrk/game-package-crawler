@@ -7,7 +7,7 @@
     <div v-if="!backendReady" class="loading-screen">
       <div class="loading-content">
         <span class="loading-logo">🚀</span>
-        <h2>游戏包名爬虫系统 v3.4</h2>
+        <h2>游戏包名爬虫系统 v3.6</h2>
         <p class="loading-text">正在唤醒后端服务，请稍候...</p>
         <el-progress :percentage="loadingDots" :indeterminate="true" :stroke-width="4" color="var(--color-primary)" class="loading-bar" />
         <p class="loading-sub">首次启动需初始化浏览器引擎 (约 3-5 秒)</p>
@@ -19,7 +19,7 @@
       <el-header class="app-header glass-header">
         <div class="header-left">
           <span class="header-logo">🎮</span>
-          <h1 class="header-title">游戏包名爬虫系统 <span class="version-tag">v3.4</span></h1>
+          <h1 class="header-title">游戏包名爬虫系统 <span class="version-tag">v3.6</span></h1>
         </div>
         <div class="header-right">
           <el-tooltip :content="store.darkMode ? '切换浅色模式' : '切换深色模式'" placement="bottom">
@@ -34,14 +34,22 @@
       </el-header>
 
       <!-- 主体 -->
-      <el-main class="app-main">
+      <el-main class="app-main" :class="{ 'full-width': store.activeTab === 'daily' }">
+        <!-- v3.6: 系统公告栏 (动态加载) -->
+        <div v-if="noticeEnabled && noticeText" class="notice-bar">
+          <div class="notice-inner">
+            <span class="notice-icon">📢</span>
+            <span class="notice-text" v-html="noticeText"></span>
+          </div>
+        </div>
+
         <el-tabs v-model="store.activeTab" type="border-card" class="main-tabs">
           <el-tab-pane name="daily">
             <template #label>
               <span class="tab-label">📰 实时更新</span>
             </template>
             <div class="tab-content animate-fade-in-scale">
-              <DailyUpdates />
+              <DailyUpdates :full-width="store.activeTab === 'daily'" />
             </div>
           </el-tab-pane>
 
@@ -116,6 +124,19 @@ const apiOnline = ref(false)
 const backendReady = ref(false)
 const loadingDots = ref(0)
 
+// v3.6: 动态公告栏
+const noticeEnabled = ref(false)
+const noticeText = ref('')
+
+async function loadNotice() {
+  try {
+    const resp = await fetch(`${store.apiBase}/api/config`)
+    const data = await resp.json()
+    noticeEnabled.value = data.notice_enabled ?? false
+    noticeText.value = data.notice_text ?? ''
+  } catch { /* 加载失败则隐藏公告栏 */ }
+}
+
 // v3.0: 轮询后端就绪状态
 async function checkReady() {
   try {
@@ -160,6 +181,7 @@ onMounted(() => {
   store.initDarkMode()
   checkReady()
   checkApi()
+  loadNotice()
   store.connectGlobalWs()
 })
 
@@ -274,12 +296,93 @@ onMounted(() => {
   box-shadow: 0 0 12px rgba(79, 70, 229, 0.2) !important;
 }
 
+/* ── 公告栏 (v3.6) ────────────────────────── */
+.notice-bar {
+  margin-bottom: 12px;
+  padding: 12px 20px;
+  background: linear-gradient(135deg, rgba(79, 70, 229, 0.08) 0%, rgba(139, 92, 246, 0.12) 50%, rgba(59, 130, 246, 0.08) 100%);
+  border: 1px solid rgba(79, 70, 229, 0.25);
+  border-radius: var(--radius-lg, 12px);
+  backdrop-filter: blur(6px);
+  box-shadow: 0 2px 16px rgba(79, 70, 229, 0.1), inset 0 1px 0 rgba(255,255,255,0.05);
+}
+.notice-inner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.notice-icon {
+  font-size: 22px;
+  flex-shrink: 0;
+  animation: noticePulse 2s ease-in-out infinite;
+}
+@keyframes noticePulse {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.15); opacity: 0.8; }
+}
+.notice-text {
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.7;
+  background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 40%, #3b82f6 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+.notice-text strong {
+  font-weight: 800;
+  text-shadow: none;
+  background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+.notice-email {
+  font-weight: 700;
+  background: linear-gradient(135deg, #f59e0b 0%, #ef4444 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  text-decoration: none;
+  cursor: pointer;
+}
+.notice-email:hover {
+  filter: brightness(1.2);
+  text-decoration: underline;
+  text-decoration-color: rgba(245, 158, 11, 0.6);
+}
+/* 暗色模式公告栏适配 */
+.dark-mode .notice-bar {
+  background: linear-gradient(135deg, rgba(79, 70, 229, 0.15) 0%, rgba(139, 92, 246, 0.2) 50%, rgba(59, 130, 246, 0.15) 100%);
+  border-color: rgba(139, 92, 246, 0.35);
+  box-shadow: 0 2px 20px rgba(139, 92, 246, 0.15), inset 0 1px 0 rgba(255,255,255,0.03);
+}
+.dark-mode .notice-text {
+  background: linear-gradient(135deg, #818cf8 0%, #a78bfa 40%, #60a5fa 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+}
+.dark-mode .notice-text strong {
+  background: linear-gradient(135deg, #a5b4fc 0%, #c4b5fd 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+}
+.dark-mode .notice-email {
+  background: linear-gradient(135deg, #fbbf24 0%, #f87171 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+}
+
 /* ── 主体 ────────────────────────────────── */
 .app-main {
   padding: 20px 28px;
   max-width: 1400px;
   margin: 0 auto;
   width: 100%;
+}
+.app-main.full-width {
+  max-width: none;
+  padding: 8px;
 }
 
 .main-tabs {

@@ -165,6 +165,35 @@
         </el-table-column>
       </el-table>
     </el-card>
+
+    <!-- v3.6: 系统公告设置 -->
+    <el-card shadow="never" class="settings-card">
+      <template #header>
+        <span class="card-title">📢 系统公告</span>
+      </template>
+      <el-form :model="config" label-width="100px" label-position="left">
+        <el-form-item label="启用公告">
+          <el-switch v-model="config.notice_enabled" />
+          <span class="form-hint">关闭后顶部公告栏将隐藏</span>
+        </el-form-item>
+        <el-form-item v-if="config.notice_enabled" label="公告内容">
+          <el-input
+            v-model="config.notice_text"
+            type="textarea"
+            :rows="5"
+            placeholder="支持 HTML 标签，例如：&lt;strong&gt;重要通知&lt;/strong&gt; &amp;nbsp;|&amp;nbsp; 内容..."
+          />
+          <div class="form-hint" style="margin-top: 4px;">
+            支持 HTML：&lt;strong&gt;加粗&lt;/strong&gt;、&lt;a href="..."&gt;链接&lt;/a&gt; 等
+          </div>
+        </el-form-item>
+        <el-form-item>
+          <el-button type="primary" :icon="Check" @click="saveConfig" :loading="saving" round>
+            💾 保存设置
+          </el-button>
+        </el-form-item>
+      </el-form>
+    </el-card>
   </div>
 </template>
 
@@ -193,6 +222,8 @@ const config = reactive({
   stealth_timeout: 60.0,
   enabled_sites: ['google_play', 'apkpure', 'apkcombo', 'apkmirror', 'apkvision'],
   google_play_cookie_path: '',
+  notice_enabled: false,
+  notice_text: '',
 })
 
 async function loadConfig() {

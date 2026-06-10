@@ -1,6 +1,6 @@
-# 游戏包名爬虫系统 v3.5
+# 游戏包名爬虫系统 v3.6
 
-Android APK 版本排查工具 — FastAPI + Vue 3 前后端分离架构。支持 6 大站点/数据源并发查询、实时更新游戏面板（APKPure/APKCombo/APKVision）、版本对比、内置异步下载（断点续传+重试+架构识别）、Excel 批量处理、记忆化输入。
+Android APK 版本排查工具 — FastAPI + Vue 3 前后端分离架构。支持 6 大站点/数据源并发查询、实时更新游戏面板（APKPure/APKCombo/APKVision）、版本对比、内置异步下载（断点续传+重试+架构识别）、Excel 批量处理、记忆化输入、动态系统公告。
 
 ## 目录结构
 
@@ -216,6 +216,8 @@ python backend/main.py
   "apkcombo_trending_display_limit": 90,
   "apkvision_display_limit": 40,
   "apkvision_new_display_limit": 40,
+  "notice_enabled": false,
+  "notice_text": "",
   "log_level": "INFO",
   "log_retention_days": 30
 }
@@ -247,6 +249,8 @@ python backend/main.py
 | `apkcombo_trending_display_limit` | int | 90 | ✅ | APKCombo Trending 展示条数 |
 | `apkvision_display_limit` | int | 40 | ✅ | APKVision Updated 展示条数 |
 | `apkvision_new_display_limit` | int | 40 | ✅ | APKVision New 展示条数 |
+| `notice_enabled` | bool | false | ✅ | 系统公告开关（v3.6） |
+| `notice_text` | str | `""` | ✅ | 公告内容，支持 HTML（v3.6） |
 | `log_level` | str | `INFO` | ✅ | 日志级别 (DEBUG/INFO/WARNING/ERROR) |
 | `log_retention_days` | int | 30 | ✅ | 日志保留天数 |
 
@@ -266,9 +270,9 @@ python backend/main.py
 
 | 源标识 | 内容 | 说明 |
 |--------|------|------|
-| `apkpure` | APKPure 排名页 | 10 个游戏分类，跨分类去重 |
-| `apkcombo` | APKCombo 热门游戏 | 按下载量排序，过滤休闲/益智类 |
-| `apkcombo_trending` | APKCombo 最新更新 | 50K+下载量游戏，3 页 |
+| `apkpure` | APKPure 排名页 | 10 个游戏分类，跨分类去重 + 关键词黑名单过滤 |
+| `apkcombo` | APKCombo 热门游戏 | 按下载量排序，关键词黑名单过滤 |
+| `apkcombo_trending` | APKCombo 最新更新 | 最近更新游戏，关键词黑名单过滤 |
 | `apkvision_updated` | APKVision 最近更新 | 20 条，含详情页时间 |
 | `apkvision_new` | APKVision 新游戏 | 20 条，含详情页时间 |
 
@@ -323,6 +327,7 @@ build_exe.bat
 | v3.3 | **反封禁**: TLS 指纹轮换 (5 指纹池) + 分类随机顺序 + 间隔随机化 3-7s。**Chromium 持久化**: 复制到 EXE 目录防杀软拦截，启动零 EPIPE。**浏览器反检测**: AutomationControlled + 随机 viewport + stealth 脚本。**熔断增强**: API 手工重置 + 连续失败自动降频至 7200s。**下载修复**: APKCombo/APKPure URL 双语言码修复 + HTML 页面自动降级 Playwright + JS 触发带 Referer 下载。**UI**: 结果表格三按钮 (详情页/浏览器下载/点击下载) |
 | v3.4 | **增量更新**: Top-N 增量+提前终止算法, 定时更新请求量 -83%。**入库去重**: (source,package) 唯一索引 + INSERT OR REPLACE 合并。**容量控制**: 数据库 150/面板 90-90-60 分源可配。**双刷新模式**: 全量/增量按钮 + 刷新面板按钮。**首次全量**: full_refresh 标志跳过提前终止。**服务器部署**: ms-playwright Chromium 兜底。**EXE 稳定性**: 全局异常捕获 + 端口占用检查 + 版本号统一 v3.4 |
 | v3.5 | **CF 防护**: StealthySession 子类限制 CF 求解递归 (_MAX_CF_SOLVE_ATTEMPTS=2), 防止 interactive Turnstile 无限循环。**域名切换**: APKPure 主域名 apkpure.com → apkpure.net (Fetcher 可用)。**CF 感知熔断**: record_cf_failure 2× 权重加速降频/熔断。**面板调整**: 各源独立展示上限 (90/60/90/40/40)。**刷新改版**: fire-and-forget 模式，点击立即返回，后台执行 + 前端自动轮询，彻底解决超时等待。**超时优化**: stealth_timeout 45→30s |
+| v3.6 | **APKPure 关键词过滤**: `_parse_apkpure_html()` 新增共享黑名单 `_GAME_EXCLUDE_KEYWORDS`，过滤棋牌/博彩/赌场/休闲/益智/音乐/教育类游戏。**whats_new 修复**: APKPure `.whats-new-content` 直接定位叶子 div 提取更新内容，修复只抓取标题无内容的 bug；扩宽占位符检测模式。**全宽自适应面板**: Daily 标签页激活时面板撑满全屏，图标(36→48px)、字体等比放大。**游戏名可点击**: 所有面板游戏名改为直接链接到详情页，移除独立 🔗 列，解决水平滚动问题。**动态系统公告**: 设置页面可编辑公告内容(支持 HTML)，开关控制显示/隐藏，即时生效无需重启。 |
 
 详见: `版本总历史.md`、`系统工作流程\系统工作流程.md`
 

@@ -26,10 +26,11 @@ def _is_placeholder_whats_new(text: str) -> bool:
         return True
     t = text.strip().lower()
     patterns = [
-        r"what'?s new in the latest version",
+        r"what'?s new in the latest",        # "What's new in the latest 4.4.0" 等
         r"^whats new[!.]*$",
         r"^no recent changes[!.]*$",
         r"^暂无更新[!.]*$",
+        r"^last updated on [\d\-]+$",        # 仅日期行，无实际内容
     ]
     for p in patterns:
         if _re.search(p, t):

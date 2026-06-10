@@ -1,5 +1,5 @@
 <template>
-  <div class="daily-updates-panel">
+  <div class="daily-updates-panel" :class="{ fw: fullWidth }">
     <el-card shadow="never" class="daily-card">
       <template #header>
         <div class="panel-header">
@@ -26,35 +26,30 @@
         <el-tab-pane label="APKPure" name="apkpure">
           <div v-if="data.apkpure.length" class="table-grid">
             <el-table v-for="(col, ci) in chunkItems(data.apkpure, 20)" :key="ci" :data="col" v-loading="loading" size="small" class="grid-table" empty-text="-">
-              <el-table-column label="" width="40">
+              <el-table-column label="" :width="fullWidth ? 52 : 40">
                 <template #default="{ row }">
-                  <el-avatar v-if="row.icon_url" :src="row.icon_url" :size="36" shape="square" />
+                  <el-avatar v-if="row.icon_url" :src="row.icon_url" :size="fullWidth ? 48 : 36" shape="square" />
                   <span v-else class="no-icon">-</span>
                 </template>
               </el-table-column>
               <el-table-column label="游戏名称" min-width="100" show-overflow-tooltip>
                 <template #default="{ row }">
                   <div class="game-name-cell">
-                    <span class="game-name">{{ row.app_name }}</span>
+                    <a v-if="row.detail_url" :href="row.detail_url" target="_blank" class="game-name-link">{{ row.app_name }}</a>
+                        <span v-else class="game-name">{{ row.app_name }}</span>
                     <span class="game-pkg" @contextmenu.prevent="onContextMenu($event, row.package_name)">{{ row.package_name }}</span>
                   </div>
                 </template>
               </el-table-column>
-              <el-table-column label="版本" width="85">
+              <el-table-column label="版本" :width="fullWidth ? 95 : 85">
                 <template #default="{ row }">
                   <span v-if="row.version_name" class="version-text">{{ row.version_name }}</span>
                   <span v-else class="no-icon">-</span>
                 </template>
               </el-table-column>
-              <el-table-column label="更新" width="95">
+              <el-table-column label="更新" :width="fullWidth ? 105 : 95">
                 <template #default="{ row }">
                   <span class="update-time">{{ row.updated_at }}</span>
-                </template>
-              </el-table-column>
-              <el-table-column label="" width="44" align="center">
-                <template #default="{ row }">
-                  <a v-if="row.detail_url" :href="row.detail_url" target="_blank" class="detail-link" title="打开详情页">🔗</a>
-                  <span v-else class="no-icon">-</span>
                 </template>
               </el-table-column>
             </el-table>
@@ -68,35 +63,24 @@
             <el-tab-pane label="🔥 热门" name="popular">
               <div v-if="data.apkcombo.length" class="table-grid">
                 <el-table v-for="(col, ci) in chunkItems(data.apkcombo, 20)" :key="ci" :data="col" v-loading="loading" size="small" class="grid-table" empty-text="-">
-                  <el-table-column label="" width="40">
+                  <el-table-column label="" :width="fullWidth ? 52 : 40">
                     <template #default="{ row }">
-                      <el-avatar v-if="row.icon_url" :src="row.icon_url" :size="36" shape="square" />
+                      <el-avatar v-if="row.icon_url" :src="row.icon_url" :size="fullWidth ? 48 : 36" shape="square" />
                       <span v-else class="no-icon">-</span>
                     </template>
                   </el-table-column>
                   <el-table-column label="游戏名称" min-width="100" show-overflow-tooltip>
                     <template #default="{ row }">
                       <div class="game-name-cell">
-                        <span class="game-name">{{ row.app_name }}</span>
+                        <a v-if="row.detail_url" :href="row.detail_url" target="_blank" class="game-name-link">{{ row.app_name }}</a>
+                        <span v-else class="game-name">{{ row.app_name }}</span>
                         <span class="game-pkg" @contextmenu.prevent="onContextMenu($event, row.package_name)">{{ row.package_name }}</span>
                       </div>
                     </template>
                   </el-table-column>
-                  <el-table-column label="下载" width="60" align="center">
-                    <template #default="{ row }">
-                      <span v-if="row.download_count" class="download-count">{{ row.download_count }}</span>
-                      <span v-else class="no-icon">-</span>
-                    </template>
-                  </el-table-column>
-                  <el-table-column label="更新" width="95">
+                  <el-table-column label="更新" :width="fullWidth ? 105 : 95">
                     <template #default="{ row }">
                       <span class="update-time">{{ row.updated_at }}</span>
-                    </template>
-                  </el-table-column>
-                  <el-table-column label="" width="44" align="center">
-                    <template #default="{ row }">
-                      <a v-if="row.detail_url" :href="row.detail_url" target="_blank" class="detail-link" title="打开详情页">🔗</a>
-                      <span v-else class="no-icon">-</span>
                     </template>
                   </el-table-column>
                 </el-table>
@@ -106,29 +90,24 @@
             <el-tab-pane label="🆕 最新更新" name="trending">
               <div v-if="data.apkcombo_trending.length" class="table-grid">
                 <el-table v-for="(col, ci) in chunkItems(data.apkcombo_trending, 20)" :key="ci" :data="col" v-loading="loading" size="small" class="grid-table" empty-text="-">
-                  <el-table-column label="" width="40">
+                  <el-table-column label="" :width="fullWidth ? 52 : 40">
                     <template #default="{ row }">
-                      <el-avatar v-if="row.icon_url" :src="row.icon_url" :size="36" shape="square" />
+                      <el-avatar v-if="row.icon_url" :src="row.icon_url" :size="fullWidth ? 48 : 36" shape="square" />
                       <span v-else class="no-icon">-</span>
                     </template>
                   </el-table-column>
                   <el-table-column label="游戏名称" min-width="100" show-overflow-tooltip>
                     <template #default="{ row }">
                       <div class="game-name-cell">
-                        <span class="game-name">{{ row.app_name }}</span>
+                        <a v-if="row.detail_url" :href="row.detail_url" target="_blank" class="game-name-link">{{ row.app_name }}</a>
+                        <span v-else class="game-name">{{ row.app_name }}</span>
                         <span class="game-pkg" @contextmenu.prevent="onContextMenu($event, row.package_name)">{{ row.package_name }}</span>
                       </div>
                     </template>
                   </el-table-column>
-                  <el-table-column label="更新" width="95">
+                  <el-table-column label="更新" :width="fullWidth ? 105 : 95">
                     <template #default="{ row }">
                       <span class="update-time">{{ row.updated_at }}</span>
-                    </template>
-                  </el-table-column>
-                  <el-table-column label="" width="44" align="center">
-                    <template #default="{ row }">
-                      <a v-if="row.detail_url" :href="row.detail_url" target="_blank" class="detail-link" title="打开详情页">🔗</a>
-                      <span v-else class="no-icon">-</span>
                     </template>
                   </el-table-column>
                 </el-table>
@@ -142,35 +121,30 @@
         <el-tab-pane label="APKVision 最近更新" name="apkvision_updated">
           <div v-if="data.apkvision_updated.length" class="table-grid">
             <el-table v-for="(col, ci) in chunkItems(data.apkvision_updated, 20)" :key="ci" :data="col" v-loading="loading" size="small" class="grid-table" empty-text="-">
-              <el-table-column label="" width="40">
+              <el-table-column label="" :width="fullWidth ? 52 : 40">
                 <template #default="{ row }">
-                  <el-avatar v-if="row.icon_url" :src="row.icon_url" :size="36" shape="square" />
+                  <el-avatar v-if="row.icon_url" :src="row.icon_url" :size="fullWidth ? 48 : 36" shape="square" />
                   <span v-else class="no-icon">-</span>
                 </template>
               </el-table-column>
               <el-table-column label="游戏名称" min-width="100" show-overflow-tooltip>
                 <template #default="{ row }">
                   <div class="game-name-cell">
-                    <span class="game-name">{{ row.app_name }}</span>
+                    <a v-if="row.detail_url" :href="row.detail_url" target="_blank" class="game-name-link">{{ row.app_name }}</a>
+                        <span v-else class="game-name">{{ row.app_name }}</span>
                     <span class="game-pkg" @contextmenu.prevent="onContextMenu($event, row.package_name)">{{ row.package_name }}</span>
                   </div>
                 </template>
               </el-table-column>
-              <el-table-column label="版本" width="85">
+              <el-table-column label="版本" :width="fullWidth ? 95 : 85">
                 <template #default="{ row }">
                   <span v-if="row.version_name" class="version-text">{{ row.version_name }}</span>
                   <span v-else class="no-icon">-</span>
                 </template>
               </el-table-column>
-              <el-table-column label="更新" width="95">
+              <el-table-column label="更新" :width="fullWidth ? 105 : 95">
                 <template #default="{ row }">
                   <span class="update-time">{{ row.updated_at }}</span>
-                </template>
-              </el-table-column>
-              <el-table-column label="" width="44" align="center">
-                <template #default="{ row }">
-                  <a v-if="row.detail_url" :href="row.detail_url" target="_blank" class="detail-link" title="打开详情页">🔗</a>
-                  <span v-else class="no-icon">-</span>
                 </template>
               </el-table-column>
             </el-table>
@@ -182,35 +156,30 @@
         <el-tab-pane label="APKVision 新游戏" name="apkvision_new">
           <div v-if="data.apkvision_new.length" class="table-grid">
             <el-table v-for="(col, ci) in chunkItems(data.apkvision_new, 20)" :key="ci" :data="col" v-loading="loading" size="small" class="grid-table" empty-text="-">
-              <el-table-column label="" width="40">
+              <el-table-column label="" :width="fullWidth ? 52 : 40">
                 <template #default="{ row }">
-                  <el-avatar v-if="row.icon_url" :src="row.icon_url" :size="36" shape="square" />
+                  <el-avatar v-if="row.icon_url" :src="row.icon_url" :size="fullWidth ? 48 : 36" shape="square" />
                   <span v-else class="no-icon">-</span>
                 </template>
               </el-table-column>
               <el-table-column label="游戏名称" min-width="100" show-overflow-tooltip>
                 <template #default="{ row }">
                   <div class="game-name-cell">
-                    <span class="game-name">{{ row.app_name }}</span>
+                    <a v-if="row.detail_url" :href="row.detail_url" target="_blank" class="game-name-link">{{ row.app_name }}</a>
+                        <span v-else class="game-name">{{ row.app_name }}</span>
                     <span class="game-pkg" @contextmenu.prevent="onContextMenu($event, row.package_name)">{{ row.package_name }}</span>
                   </div>
                 </template>
               </el-table-column>
-              <el-table-column label="版本" width="85">
+              <el-table-column label="版本" :width="fullWidth ? 95 : 85">
                 <template #default="{ row }">
                   <span v-if="row.version_name" class="version-text">{{ row.version_name }}</span>
                   <span v-else class="no-icon">-</span>
                 </template>
               </el-table-column>
-              <el-table-column label="更新" width="95">
+              <el-table-column label="更新" :width="fullWidth ? 105 : 95">
                 <template #default="{ row }">
                   <span class="update-time">{{ row.updated_at }}</span>
-                </template>
-              </el-table-column>
-              <el-table-column label="" width="44" align="center">
-                <template #default="{ row }">
-                  <a v-if="row.detail_url" :href="row.detail_url" target="_blank" class="detail-link" title="打开详情页">🔗</a>
-                  <span v-else class="no-icon">-</span>
                 </template>
               </el-table-column>
             </el-table>
@@ -253,6 +222,7 @@ interface DailyData {
   last_fetched_at?: string
 }
 
+const props = defineProps<{ fullWidth?: boolean }>()
 const store = useAppStore()
 const data = ref<DailyData>({
   apkpure: [], apkcombo: [], apkcombo_trending: [],
@@ -445,14 +415,20 @@ onUnmounted(() => {
 
 .game-name-cell { display: flex; flex-direction: column; gap: 2px; line-height: 1.3; }
 .game-name { font-size: 13px; font-weight: 500; }
+.game-name-link { font-size: 13px; font-weight: 500; color: var(--el-text-color-primary, #303133); text-decoration: none; }
+.game-name-link:hover { color: var(--el-color-primary, #409eff); text-decoration: underline; }
 .game-pkg { font-size: 11px; color: var(--text-secondary); font-family: 'Consolas', 'Courier New', monospace; }
 
 .version-text { font-size: 12px; color: var(--color-primary); font-weight: 500; }
 .download-count { font-size: 12px; font-weight: 600; color: var(--color-primary); }
 .update-time { font-size: 12px; color: var(--text-secondary); white-space: nowrap; }
 
-.detail-link { font-size: 15px; text-decoration: none; }
-.detail-link:hover { transform: scale(1.2); }
+/* v3.6: full-width 模式 — 字段自适应放大 */
+.fw .game-name, .fw .game-name-link { font-size: 15px; }
+.fw .game-pkg { font-size: 13px; }
+.fw .version-text, .fw .update-time { font-size: 13px; }
+.fw .el-avatar { --el-avatar-size: 48px !important; }
+
 
 .empty-hint { text-align: center; padding: 40px 0; color: var(--text-muted); font-size: 14px; }
 .no-icon { color: var(--text-muted); font-size: 11px; }
