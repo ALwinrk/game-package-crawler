@@ -130,17 +130,37 @@ def main():
         # 短暂等待端口释放
         time.sleep(1.5)
 
-    # 后台打开浏览器
+    # v3.6: 等待端口可访问后再打开浏览器 (避免低配电脑 ERR_CONNECTION_REFUSED)
+    def wait_for_port(h: str, p: int, timeout: float = 30.0) -> bool:
+        # 先等 uvicorn 完成模块导入和端口绑定 (低配电脑需要更长时间)
+        time.sleep(3.0)
+        start = time.time()
+        while time.time() - start < timeout:
+            try:
+                sock = _socket.socket(_socket.AF_INET, _socket.SOCK_STREAM)
+                sock.settimeout(0.5)
+                if sock.connect_ex((h, p)) == 0:
+                    sock.close()
+                    return True
+                sock.close()
+            except Exception:
+                pass
+            time.sleep(0.3)
+        return False
+
     def open_browser():
-        time.sleep(2.0)
-        webbrowser.open(f"http://{host}:{port}")
+        if wait_for_port(host, port):
+            webbrowser.open(f"http://{host}:{port}")
+            print(f"[启动] 浏览器已打开: http://{host}:{port}")
+        else:
+            print(f"[警告] 后端端口未能及时监听，请手动打开浏览器访问 http://{host}:{port}")
 
     threading.Thread(target=open_browser, daemon=True).start()
 
     # v3.0: 注册强制退出处理器
     _setup_exit_handler()
 
-    print(f"游戏包名爬虫系统 v3.6")
+    print(f"游戏包名爬虫系统 v3.7")
     print(f"启动服务: http://{host}:{port}")
     print(f"工作目录: {os.getcwd()}")
     print("-" * 50)

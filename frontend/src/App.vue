@@ -7,7 +7,7 @@
     <div v-if="!backendReady" class="loading-screen">
       <div class="loading-content">
         <span class="loading-logo">🚀</span>
-        <h2>游戏包名爬虫系统 v3.6</h2>
+        <h2>游戏包名爬虫系统 v3.7</h2>
         <p class="loading-text">正在唤醒后端服务，请稍候...</p>
         <el-progress :percentage="loadingDots" :indeterminate="true" :stroke-width="4" color="var(--color-primary)" class="loading-bar" />
         <p class="loading-sub">首次启动需初始化浏览器引擎 (约 3-5 秒)</p>
@@ -19,7 +19,7 @@
       <el-header class="app-header glass-header">
         <div class="header-left">
           <span class="header-logo">🎮</span>
-          <h1 class="header-title">游戏包名爬虫系统 <span class="version-tag">v3.6</span></h1>
+          <h1 class="header-title">游戏包名爬虫系统 <span class="version-tag">v3.7</span></h1>
         </div>
         <div class="header-right">
           <el-tooltip :content="store.darkMode ? '切换浅色模式' : '切换深色模式'" placement="bottom">
@@ -35,7 +35,7 @@
 
       <!-- 主体 -->
       <el-main class="app-main" :class="{ 'full-width': store.activeTab === 'daily' }">
-        <!-- v3.6: 系统公告栏 (动态加载) -->
+        <!-- v3.7: 系统公告栏 (动态加载) -->
         <div v-if="noticeEnabled && noticeText" class="notice-bar">
           <div class="notice-inner">
             <span class="notice-icon">📢</span>
@@ -111,6 +111,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { Moon, Sunny } from '@element-plus/icons-vue'
+import { ElMessage } from 'element-plus'
 import { useAppStore } from './stores/app'
 import PackageInput from './components/PackageInput.vue'
 import DailyUpdates from './components/DailyUpdates.vue'
@@ -124,7 +125,7 @@ const apiOnline = ref(false)
 const backendReady = ref(false)
 const loadingDots = ref(0)
 
-// v3.6: 动态公告栏
+// v3.7: 动态公告栏
 const noticeEnabled = ref(false)
 const noticeText = ref('')
 
@@ -137,7 +138,11 @@ async function loadNotice() {
   } catch { /* 加载失败则隐藏公告栏 */ }
 }
 
-// v3.0: 轮询后端就绪状态
+// v3.7: 弹性轮询后端就绪状态 (指数退避, 最长 60s)
+const _readyStartTime = Date.now()
+const MAX_READY_WAIT = 60000  // 最长等待 60 秒
+let _readyRetryDelay = 500
+
 async function checkReady() {
   try {
     const resp = await fetch(`${store.apiBase}/api/ready`)
@@ -145,10 +150,20 @@ async function checkReady() {
     const data = await resp.json()
     if (data.status === 'ready') {
       backendReady.value = true
+      if (data.browser_available === false) {
+        setTimeout(() => {
+          ElMessage.warning('浏览器引擎不可用，慢速站点(APKMirror/APKVision)可能无法使用，快速排查仍正常')
+        }, 500)
+      }
       return
     }
-  } catch { }
-  setTimeout(checkReady, 500)
+  } catch { /* 后端尚未监听端口，继续重试 */ }
+  if (Date.now() - _readyStartTime < MAX_READY_WAIT) {
+    setTimeout(checkReady, _readyRetryDelay)
+    _readyRetryDelay = Math.min(_readyRetryDelay * 1.5, 5000)  // 指数退避, 最大 5s
+  } else {
+    ElMessage.error('后端启动超时 (60s)，请检查代理配置或重启程序')
+  }
 }
 
 // 幽默随机语录
@@ -296,7 +311,7 @@ onMounted(() => {
   box-shadow: 0 0 12px rgba(79, 70, 229, 0.2) !important;
 }
 
-/* ── 公告栏 (v3.6) ────────────────────────── */
+/* ── 公告栏 (v3.7) ────────────────────────── */
 .notice-bar {
   margin-bottom: 12px;
   padding: 12px 20px;

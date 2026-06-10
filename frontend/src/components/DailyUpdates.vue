@@ -7,17 +7,38 @@
             <span class="panel-title">📰 实时更新游戏</span>
             <span v-if="lastFetchedAt" class="fetched-time">数据更新于 {{ lastFetchedAt }}</span>
           </div>
-          <el-button size="small" @click="refreshPanel" :loading="loadingPanel" round>
-            🔄 刷新面板
-          </el-button>
-          <el-button size="small" :icon="Refresh" @click="refreshIncremental"
-            :loading="loadingIncr" round>
-            增量刷新
-          </el-button>
-          <el-button size="small" type="primary" :icon="Refresh" @click="refreshFull"
-            :loading="loadingFull" round>
-            全量刷新
-          </el-button>
+          <div class="header-actions">
+            <!-- v3.6: 数据源选择器 -->
+            <el-popover placement="bottom" :width="200" trigger="click">
+              <template #reference>
+                <el-button size="small" round>
+                  📡 数据源 ({{ selectedSources.length }}/5)
+                </el-button>
+              </template>
+              <div class="source-selector">
+                <div class="source-actions">
+                  <el-button size="small" text @click="selectAllSources">全选</el-button>
+                  <el-button size="small" text @click="clearSources">清空</el-button>
+                </div>
+                <el-checkbox-group v-model="selectedSources">
+                  <el-checkbox v-for="s in allSources" :key="s.value" :label="s.value" class="source-checkbox">
+                    {{ s.label }}
+                  </el-checkbox>
+                </el-checkbox-group>
+              </div>
+            </el-popover>
+            <el-button size="small" @click="refreshPanel" :loading="loadingPanel" :disabled="!selectedSources.length" round>
+              🔄 刷新面板
+            </el-button>
+            <el-button size="small" :icon="Refresh" @click="refreshIncremental"
+              :loading="loadingIncr" :disabled="!selectedSources.length" round>
+              增量刷新
+            </el-button>
+            <el-button size="small" type="primary" :icon="Refresh" @click="refreshFull"
+              :loading="loadingFull" :disabled="!selectedSources.length" round>
+              全量刷新
+            </el-button>
+          </div>
         </div>
       </template>
 
@@ -224,6 +245,34 @@ interface DailyData {
 
 const props = defineProps<{ fullWidth?: boolean }>()
 const store = useAppStore()
+
+// v3.6: 数据源选择
+const allSources = [
+  { value: 'apkpure', label: 'APKPure' },
+  { value: 'apkcombo', label: 'APKCombo 热门' },
+  { value: 'apkcombo_trending', label: 'APKCombo 最新更新' },
+  { value: 'apkvision_updated', label: 'APKVision 最近更新' },
+  { value: 'apkvision_new', label: 'APKVision 新游戏' },
+]
+const STORAGE_KEY = 'daily_sources'
+const savedSources = localStorage.getItem(STORAGE_KEY)
+const selectedSources = ref<string[]>(
+  savedSources ? JSON.parse(savedSources) : allSources.map(s => s.value)
+)
+
+function persistSources() {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(selectedSources.value))
+}
+
+function selectAllSources() {
+  selectedSources.value = allSources.map(s => s.value)
+  persistSources()
+}
+
+function clearSources() {
+  selectedSources.value = []
+  persistSources()
+}
 const data = ref<DailyData>({
   apkpure: [], apkcombo: [], apkcombo_trending: [],
   apkvision_updated: [], apkvision_new: [],
@@ -300,6 +349,10 @@ const loadingPanel = ref(false)
 
 /** 刷新面板 — 仅从数据库拉取最新数据, 不触发爬取 */
 async function refreshPanel(): Promise<void> {
+  if (!selectedSources.value.length) {
+    ElMessage.warning('请先选择数据源')
+    return
+  }
   loadingPanel.value = true
   try {
     await fetchUpdates(true)
@@ -338,11 +391,20 @@ function startRefreshPolling(label: string): void {
   }, 5000)
 }
 
-/** v3.5 fire-and-forget: 增量刷新 — 立即返回, 后台执行 */
+/** v3.6 fire-and-forget: 增量刷新 — 立即返回, 后台执行, 支持选择源 */
 async function refreshIncremental(): Promise<void> {
+  if (!selectedSources.value.length) {
+    ElMessage.warning('请先选择数据源')
+    return
+  }
   loadingIncr.value = true
+  persistSources()
   try {
-    const resp = await fetch(`${store.apiBase}/api/daily-updates/refresh-incremental`, { method: 'POST' })
+    const resp = await fetch(`${store.apiBase}/api/daily-updates/refresh-incremental`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sources: selectedSources.value }),
+    })
     const result = await resp.json()
     if (result.status === 'started') {
       ElMessage.info('增量刷新已启动，后台抓取中...')
@@ -359,11 +421,20 @@ async function refreshIncremental(): Promise<void> {
   }
 }
 
-/** v3.5 fire-and-forget: 全量刷新 — 立即返回, 后台执行 */
+/** v3.6 fire-and-forget: 全量刷新 — 立即返回, 后台执行, 支持选择源 */
 async function refreshFull(): Promise<void> {
+  if (!selectedSources.value.length) {
+    ElMessage.warning('请先选择数据源')
+    return
+  }
   loadingFull.value = true
+  persistSources()
   try {
-    const resp = await fetch(`${store.apiBase}/api/daily-updates/refresh`, { method: 'POST' })
+    const resp = await fetch(`${store.apiBase}/api/daily-updates/refresh`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sources: selectedSources.value }),
+    })
     const result = await resp.json()
     if (result.status === 'started') {
       ElMessage.info('全量刷新已启动，后台抓取中...')
@@ -407,6 +478,12 @@ onUnmounted(() => {
 .header-left {
   display: flex; align-items: center; gap: 14px;
 }
+.header-actions {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+}
+.source-selector { display: flex; flex-direction: column; gap: 4px; }
+.source-actions { display: flex; gap: 8px; margin-bottom: 4px; }
+.source-checkbox { margin: 4px 0; }
 .panel-title { font-weight: 700; font-size: 16px; }
 .fetched-time { font-size: 12px; color: var(--text-muted); font-style: italic; }
 

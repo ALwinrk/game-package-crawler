@@ -1,158 +1,175 @@
-# APKPure Cloudflare 封禁根本解决方案（免费，无住宅代理）
+实时游戏面板手动切换数据源功能设计文档
+一、需求概述
+在现有的实时游戏面板（DailyUpdates）中，增加手动选择数据源的功能，允许用户仅刷新自己关心的源，避免每次都全量爬取所有源（APKPure、APKCombo、APKCombo Trending、APKVision Updated、APKVision New），从而减少不必要的网络请求和服务器负载，提升刷新效率。
 
-## 问题定位
+典型使用场景：
 
-APKPure 使用 Cloudflare Turnstile 检测自动化行为，主要依据：
-1. **TLS 指纹**：curl_cffi 虽能模拟，但长期单一指纹易被关联
-2. **无头浏览器特征**：StealthySession 默认配置可能暴露 WebDriver
-3. **请求规律**：固定间隔、固定顺序、无随机性
-4. **单 IP 高频**：即使代理池，若出口 IP 不变，仍被封
+只想查看 APKVision 新游戏 → 仅选择 apkvision_new，其他源不刷新（保留上次数据）。
 
-## 免费解决方案总览
+只想同时查看 APKPure 和 APKCombo 热门 → 选择 apkpure 和 apkcombo，不刷新其他。
 
-| 层级 | 措施 | 实现位置 | 效果 |
-|------|------|----------|------|
-| 1 | StealthySession 自动求解 | `http_client.py` | 必须，已启用 |
-| 2 | TLS 指纹轮换 | `http_client.py` | 核心突破 |
-| 3 | 请求随机化（间隔+顺序） | `update_tracker.py` | 辅助 |
-| 4 | 降低频率 + 批次暂停 | `config.json` | 必要 |
-| 5 | Playwright 反检测增强 | `browser_manager.py` | 加固 |
-| 6 | 熔断器 + 人工干预接口 | `update_tracker.py` | 兜底 |
+二、可行性分析
+✅ 完全可行，且对现有功能无负面影响。
 
-## 一、TLS 指纹轮换（curl_cffi 层）
+当前后端刷新接口已支持 fire-and-forget 模式，可扩展接受参数 sources。
 
-### 修改 `backend/core/http_client.py`
+数据库存储按源隔离（source 字段），可以独立更新单个源的数据而不影响其他源。
 
-增加指纹池，每次请求随机选择：
+前端已有丰富的 UI 组件（多选框、复选框组），易于集成。
 
-```python
-from curl_cffi import requests
-import random
+三、设计方案
+3.1 后端修改
+3.1.1 修改刷新 API 接受源参数
+当前端点：
 
-FINGERPRINTS = [
-    "chrome110", "chrome116", "chrome120",
-    "edge101", "safari15_5", "firefox110"
-]
+POST /api/daily-updates/refresh （全量刷新）
 
-def get_random_fingerprint():
-    return random.choice(FINGERPRINTS)
+POST /api/daily-updates/refresh-incremental （增量刷新）
 
-async def fetch_with_fingerprint(url, proxy=None):
-    fp = get_random_fingerprint()
-    session = requests.AsyncSession(impersonate=fp, proxy=proxy)
-    return await session.get(url, timeout=10)
-修改 StealthySession 的 __init__，允许传入 impersonate 参数并随机化。
+修改后：
 
-二、请求随机化（行为层）
-2.1 修改 backend/cron/update_tracker.py
-在抓取循环中加入随机延迟和顺序打乱：
+两个端点均增加可选 JSON 参数 sources，类型为字符串数组，例如 ["apkpure", "apkcombo"]。
 
-python
-import asyncio
-import random
+若未提供 sources 或数组为空，则保持原有行为（刷新所有已配置的源）。
 
-# 打乱分类列表
-categories = list(APKPURE_CATEGORIES.items())
-random.shuffle(categories)
+若提供了 sources，则仅刷新指定的源，其他源的数据在数据库中保持不变。
 
-for name, url in categories:
-    # 抓取逻辑...
-    await asyncio.sleep(random.uniform(3.0, 7.0))   # 页间随机暂停
-2.2 随机化 User-Agent
-在 http_client.py 中维护 UA 池，随机选择：
+实现要点：
 
-python
-USER_AGENTS = [
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0",
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/119.0.0.0",
-    # ...
-]
-三、配置调优（config.json）
-针对团队使用（日均 200 款），推荐保守配置：
+在 update_tracker.py 中新增函数 refresh_sources(source_list, incremental=False)。
+
+该函数根据 incremental 标志调用原有的抓取逻辑，但只执行列表中源对应的抓取函数。
+
+对未选中的源，不调用任何抓取函数，也不删除其已有数据。
+
+示例请求：
 
 json
+POST /api/daily-updates/refresh
+Content-Type: application/json
+
 {
-  "scraper_concurrency": 2,
-  "playwright_concurrency": 1,
-  "update_check_interval": 7200,
-  "daily_updates_pages": 1,
-  "stealth_timeout": 60,
-  "retry_times": 3,
-  "retry_delay": 5.0,
-  "request_timeout": 15.0
+  "sources": ["apkpure", "apkcombo"]
 }
-同时，若 APKPure 持续失败，可通过 enabled_sites 临时移除：
+3.1.2 独立抓取函数支持
+当前 update_tracker.py 中已有按源的独立抓取函数：
 
-json
-"enabled_sites": ["google_play", "apkcombo", "apkvision"]
-四、Playwright 无头浏览器反检测增强
-修改 backend/core/browser_manager.py
-在创建浏览器上下文时，增加反检测参数和脚本：
+fetch_apkpure()
 
-python
-context = await browser.new_context(
-    viewport={'width': random.randint(1024, 1920), 'height': random.randint(768, 1080)},
-    user_agent=random.choice(USER_AGENTS),
-    locale='zh-CN',
-    timezone_id='Asia/Shanghai',
-    ignore_default_args=["--enable-automation"],
-    extra_http_headers={"Accept-Language": "zh-CN,zh;q=0.9"}
-)
+fetch_apkcombo()
 
-# 注入 stealth 脚本
-await context.add_init_script("""
-    Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
-    window.chrome = { runtime: {} };
-    const originalQuery = window.navigator.permissions.query;
-    window.navigator.permissions.query = (parameters) => (
-        parameters.name === 'notifications' ?
-            Promise.resolve({ state: Notification.permission }) :
-            originalQuery(parameters)
-    );
-""")
-五、熔断器 + 人工干预接口（兜底）
-5.1 熔断器实现（update_tracker.py）
-python
-class CircuitBreaker:
-    def __init__(self, name, failure_threshold=3, recovery_timeout=3600):
-        self.name = name
-        self.failure_count = 0
-        self.is_open = False
-        self.open_until = 0
+fetch_apkcombo_trending()
 
-    def record_failure(self):
-        self.failure_count += 1
-        if self.failure_count >= self.failure_threshold:
-            self.open()
+fetch_apkvision_updated()
 
-    def record_success(self):
-        self.failure_count = 0
-        self.is_open = False
+fetch_apkvision_new()
 
-    def open(self):
-        self.is_open = True
-        self.open_until = time.time() + recovery_timeout
+这些函数均独立调用并写入数据库。refresh_sources 只需按需调用并处理异常。
 
-    def is_closed(self):
-        if self.is_open and time.time() > self.open_until:
-            self.is_open = False
-            self.failure_count = 0
-        return not self.is_open
-在 fetch_apkpure_updates 中集成熔断器，连续失败 3 次后跳过该源 1 小时。
+3.1.3 状态反馈（可选）
+由于采用 fire-and-forget 模式，刷新立即返回。可增加 GET /api/daily-updates/refresh-status 接口，返回每个源的最近刷新状态（成功/失败/正在刷新），供前端显示进度。但不是必须，可后续优化。
 
-5.2 人工干预接口
-当检测到 Turnstile 页面时，将 URL 存入数据库表 captcha_tasks，并通过 WebSocket 向前端推送通知。管理员可点击链接手动完成验证，然后恢复。
+3.2 前端修改
+3.2.1 新增数据源选择器
+在 DailyUpdates.vue 组件的工具栏（现有“手动刷新”按钮旁边）增加一个下拉多选框或按钮组，用于选择要刷新的源。
 
-简化版：在日志中打印 URL，管理员手动访问解封后，通过 API /api/apkpure/unblock 重置熔断器。
+组件建议：使用 el-dropdown + el-checkbox-group，或使用 el-popover 内含复选框。
 
-六、监控与恢复建议
-在 update_tracker.py 中增加日志：每次抓取成功/失败计数，便于分析封禁规律。
+示例 UI：
 
-如果连续 2 次失败，自动将 update_check_interval 临时调整为 7200 秒（写回 config.json），避免频繁重试。
+text
+[ 选择数据源 ▼ ]  [ 全量刷新 ]  [ 增量刷新 ]
+点击“选择数据源”弹出面板，列出所有源（带复选框）：
 
-定期（如每周）手动更换出口 IP（重启路由器或切换 VPN 节点）。
+☑ APKPure 热门
 
-七、总结
-本方案通过指纹轮换、行为随机化、浏览器反检测、熔断器四层防护，在不使用住宅代理的前提下，大幅降低 APKPure 封禁概率。若仍被封，说明 IP 已进入黑名单，唯一的免费办法是更换网络出口 IP（如重启路由器），或临时禁用 APKPure 源。
+☑ APKCombo 热门
 
-将这些改进集成到 v3.2 代码库后，APKPure 的可用性将显著提升。
+☑ APKCombo 最新更新
+
+☑ APKVision 最近更新
+
+☑ APKVision 新游戏
+
+用户勾选后，关闭面板。后续点击“全量刷新”或“增量刷新”时，仅刷新勾选的源。
+
+3.2.2 刷新逻辑修改
+当用户点击“全量刷新”或“增量刷新”时，前端收集当前勾选的源列表。
+
+若列表非空，调用对应的 API（/api/daily-updates/refresh 或 /refresh-incremental），并在请求体中附带 sources 数组。
+
+若列表为空（未勾选任何源），提示用户至少选择一个源，或默认全选。
+
+提供“全选”快捷按钮，一键选择所有源，恢复原有行为。
+
+3.2.3 用户提示
+刷新过程中，由于是 fire-and-forget，前端可显示全局 loading 或 toast 提示“正在刷新所选源，请稍后查看”。
+
+若部分源刷新失败，可通过轮询状态接口（如实现）或依赖后续自动定时刷新恢复。
+
+3.3 数据库与数据一致性
+不同源的数据存储在同一张 daily_updates 表中，通过 source 字段区分。
+
+刷新选中源时，执行 DELETE FROM daily_updates WHERE source = ? 然后插入新数据（或使用 INSERT OR REPLACE）。不影响未选中源的数据。
+
+前端展示时，各标签页直接从数据库读取对应源的数据，因此未刷新的源仍显示上次抓取的内容，符合预期。
+
+3.4 性能与资源影响
+用户主动选择少量源刷新时，爬虫负载显著降低，对低配电脑尤其友好。
+
+支持用户按需刷新，避免了不必要的全量抓取，总体资源消耗减少。
+
+不影响原有的定时自动增量刷新（仍按配置 update_check_interval 全量或增量执行）。定时任务可沿用原有逻辑，或也支持按配置的源列表执行（可后续扩展）。
+
+四、注意事项
+定时任务与手动刷新的关系：
+定时任务（每30分钟）仍保持原有行为（刷新全部源或增量全源），以保证数据及时性。用户手动刷新只是补充，不影响自动任务。
+
+源名称一致：
+前端传递给后端的源名称必须与后端抓取函数标识完全一致。建议定义常量：
+
+apkpure
+
+apkcombo
+
+apkcombo_trending
+
+apkvision_updated
+
+apkvision_new
+
+错误处理：
+若用户选择的某个源刷新失败（如站点被封），其他源仍应继续刷新，失败信息记录日志，前端不阻塞。
+
+首次加载面板：
+v3.6 启动后面板为空，用户需手动刷新。此时若未选择任何源，应提示用户先选择源，或默认全选。
+
+UI 兼容性：
+所有修改仅影响实时更新面板的刷新行为，不影响排查、下载等核心功能。
+
+五、实施步骤（供开发参考）
+后端：
+
+修改 routes.py 中 /api/daily-updates/refresh 和 /refresh-incremental 接口，解析 sources 参数。
+
+在 update_tracker.py 中实现 refresh_sources(sources, incremental)，调用对应的抓取函数。
+
+确保异常隔离，单个源失败不影响其他源。
+
+前端：
+
+在 DailyUpdates.vue 中添加数据源选择组件（复选框组）。
+
+修改 refresh() 和 refreshIncremental() 方法，读取选中源列表，发送请求。
+
+增加“全选”按钮及交互提示。
+
+测试：
+
+选择单个源刷新 → 仅该源表格数据更新，其他源不变。
+
+选择多个源刷新 → 对应源更新。
+
+不选择任何源 → 提示用户或默认全选。
+
+全量刷新（原行为）→ 所有源更新。

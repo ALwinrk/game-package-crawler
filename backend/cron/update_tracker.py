@@ -531,7 +531,7 @@ async def fetch_apkcombo_updates(full_refresh: bool = False):
     logger.info("APKCombo list: {} total, {} new", len(items), len(new_items))
     if not new_items:
         return []
-    new_items = await _enrich_with_detail_times(new_items, "apkcombo", max_enrich=60)
+    new_items = await _enrich_with_detail_times(new_items, "apkcombo", max_enrich=30)
     logger.info("APKCombo enriched: {} items", len(new_items))
     return new_items
 
@@ -584,7 +584,7 @@ async def fetch_apkcombo_trending_updates(full_refresh: bool = False):
         logger.info("APKCombo trending 无新数据")
         return []
     logger.info("APKCombo trending: {} new items, enriching...", len(items))
-    items = await _enrich_with_detail_times(items, "apkcombo", max_enrich=90)
+    items = await _enrich_with_detail_times(items, "apkcombo", max_enrich=40)
     logger.info("APKCombo trending enriched: {} items", len(items))
     return items
 
@@ -962,26 +962,29 @@ async def fetch_source_with_circuit_breaker(source, full_refresh: bool = False):
         await record_failure(source)
 
 
-async def update_once(full_refresh: bool = False):
+async def update_once(full_refresh: bool = False, sources: list[str] | None = None):
+    """执行一次更新周期.
+
+    Args:
+        full_refresh: True=全量刷新, False=增量刷新
+        sources: 指定刷新的源列表, None=全部源
+    """
+    all_sources = [
+        "apkpure", "apkcombo", "apkcombo_trending",
+        "apkvision_updated", "apkvision_new",
+    ]
+    targets = [s for s in (sources or all_sources) if s in all_sources]
+    if not targets:
+        return
     await asyncio.gather(
-        fetch_source_with_circuit_breaker("apkpure", full_refresh=full_refresh),
-        fetch_source_with_circuit_breaker("apkcombo", full_refresh=full_refresh),
-        fetch_source_with_circuit_breaker("apkcombo_trending", full_refresh=full_refresh),
-        fetch_source_with_circuit_breaker("apkvision_updated", full_refresh=full_refresh),
-        fetch_source_with_circuit_breaker("apkvision_new", full_refresh=full_refresh),
+        *(fetch_source_with_circuit_breaker(s, full_refresh=full_refresh) for s in targets),
         return_exceptions=True,
     )
     set_last_modified(datetime.now(timezone.utc))
 
 
 async def run_periodic_updates():
-    # 首次启动: 全量刷新
-    try:
-        await update_once(full_refresh=True)
-    except asyncio.CancelledError:
-        raise
-    except Exception as e:
-        logger.error("initial full refresh failed: {}", e)
+    # v3.6: 不再自动全量刷新，等待用户手动点击「全量刷新」按钮触发
     while True:
         settings = get_settings()
         interval = getattr(settings, "update_check_interval", 1800)

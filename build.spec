@@ -219,7 +219,7 @@ exe = EXE(
     a.zipfiles,
     a.datas,
     [],
-    name="游戏包名爬虫系统_v3.4",
+    name="游戏包名爬虫系统_v3.7",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,

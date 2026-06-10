@@ -27,6 +27,7 @@ from backend.logging_setup import setup_logging, get_logger
 
 # ── 浏览器就绪事件 (v3.0: 后台初始化, 不阻塞服务启动) ────
 browser_ready = asyncio.Event()
+browser_failed = asyncio.Event()  # v3.6: 浏览器初始化失败标志
 
 
 # ── 强制退出 (v3.0: 秒级关闭) ──────────────────────────
@@ -107,6 +108,8 @@ async def lifespan(app: FastAPI):
             logger.info("Playwright 浏览器就绪")
         except Exception as e:
             logger.warning("浏览器初始化失败 (慢速源不可用): {}", e)
+            browser_failed.set()
+            browser_ready.set()   # v3.6: 仍标记就绪，避免前端无限等待
 
     browser_task = asyncio.create_task(_init_browser_background())
 
@@ -126,19 +129,10 @@ async def lifespan(app: FastAPI):
 
     update_task = asyncio.create_task(run_periodic_updates())
 
-    if not has_data:
-        # 全新安装无缓存数据 → 等待首次抓取完成 (最多 45s)
-        logger.info("数据库无缓存数据, 等待首次抓取 (最多 45s)...")
-        for _ in range(60):  # 60 × 0.75s = 45s
-            if get_last_modified() is not None:
-                break
-            await asyncio.sleep(0.75)
-        if get_last_modified() is not None:
-            logger.info("首次实时面板数据抓取完成")
-        else:
-            logger.warning("首次抓取超时, 面板可能暂时为空, 后台继续")
-    else:
+    if has_data:
         logger.info("已有缓存数据 ({} 条), 面板立即可用", count)
+    else:
+        logger.info("数据库无缓存数据，请手动点击「全量刷新」开始爬取")
 
     logger.info("代理: {}", settings.proxy or "未配置")
     logger.info("启用站点: {}", ", ".join(settings.enabled_sites))
@@ -194,7 +188,11 @@ app.include_router(router)
 
 @app.get("/api/ready")
 async def ready():
-    return {"status": "ready" if browser_ready.is_set() else "loading"}
+    if browser_failed.is_set():
+        return {"status": "ready", "browser_available": False}
+    if not browser_ready.is_set():
+        return {"status": "loading"}
+    return {"status": "ready", "browser_available": True}
 
 
 # ── 静态文件 (Vue3 前端) ─────────────────────────────────

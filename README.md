@@ -1,4 +1,4 @@
-# 游戏包名爬虫系统 v3.6
+# 游戏包名爬虫系统 v3.7
 
 Android APK 版本排查工具 — FastAPI + Vue 3 前后端分离架构。支持 6 大站点/数据源并发查询、实时更新游戏面板（APKPure/APKCombo/APKVision）、版本对比、内置异步下载（断点续传+重试+架构识别）、Excel 批量处理、记忆化输入、动态系统公告。
 
@@ -112,7 +112,7 @@ python backend/main.py
 
 浏览器访问: http://127.0.0.1:8000
 
-首次启动无缓存数据时，实时更新面板会自动抓取（最多等待 45s）。
+首次启动面板无数据，需手动点击「🔄 全量刷新」开始爬取。之后每小时自动增量更新。
 
 ### 5. API 文档
 
@@ -327,47 +327,10 @@ build_exe.bat
 | v3.3 | **反封禁**: TLS 指纹轮换 (5 指纹池) + 分类随机顺序 + 间隔随机化 3-7s。**Chromium 持久化**: 复制到 EXE 目录防杀软拦截，启动零 EPIPE。**浏览器反检测**: AutomationControlled + 随机 viewport + stealth 脚本。**熔断增强**: API 手工重置 + 连续失败自动降频至 7200s。**下载修复**: APKCombo/APKPure URL 双语言码修复 + HTML 页面自动降级 Playwright + JS 触发带 Referer 下载。**UI**: 结果表格三按钮 (详情页/浏览器下载/点击下载) |
 | v3.4 | **增量更新**: Top-N 增量+提前终止算法, 定时更新请求量 -83%。**入库去重**: (source,package) 唯一索引 + INSERT OR REPLACE 合并。**容量控制**: 数据库 150/面板 90-90-60 分源可配。**双刷新模式**: 全量/增量按钮 + 刷新面板按钮。**首次全量**: full_refresh 标志跳过提前终止。**服务器部署**: ms-playwright Chromium 兜底。**EXE 稳定性**: 全局异常捕获 + 端口占用检查 + 版本号统一 v3.4 |
 | v3.5 | **CF 防护**: StealthySession 子类限制 CF 求解递归 (_MAX_CF_SOLVE_ATTEMPTS=2), 防止 interactive Turnstile 无限循环。**域名切换**: APKPure 主域名 apkpure.com → apkpure.net (Fetcher 可用)。**CF 感知熔断**: record_cf_failure 2× 权重加速降频/熔断。**面板调整**: 各源独立展示上限 (90/60/90/40/40)。**刷新改版**: fire-and-forget 模式，点击立即返回，后台执行 + 前端自动轮询，彻底解决超时等待。**超时优化**: stealth_timeout 45→30s |
-| v3.6 | **APKPure 关键词过滤**: `_parse_apkpure_html()` 新增共享黑名单 `_GAME_EXCLUDE_KEYWORDS`，过滤棋牌/博彩/赌场/休闲/益智/音乐/教育类游戏。**whats_new 修复**: APKPure `.whats-new-content` 直接定位叶子 div 提取更新内容，修复只抓取标题无内容的 bug；扩宽占位符检测模式。**全宽自适应面板**: Daily 标签页激活时面板撑满全屏，图标(36→48px)、字体等比放大。**游戏名可点击**: 所有面板游戏名改为直接链接到详情页，移除独立 🔗 列，解决水平滚动问题。**动态系统公告**: 设置页面可编辑公告内容(支持 HTML)，开关控制显示/隐藏，即时生效无需重启。 |
+| v3.6 | **APKPure 关键词过滤**...启动行为: 不再自动全量刷新，需手动点击「全量刷新」触发爬取。 |
+| v3.7 | **数据源选择器**: 面板新增📡下拉多选框，可按需选择刷新指定源，避免全量爬取。**per-source 锁定**: 全局刷新锁改为按源锁定，不同源可并行刷新。**启动优化**: launcher 端口等待(3s延迟+30s超时)消除 ERR_CONNECTION_REFUSED；前端弹性轮询(指数退避+60s超时)；浏览器初始化失败不再阻塞就绪。**增量提速**: APKCombo 详情富化上限缩减(60→30, 90→40)，单次增量周期加速50%。**移除启动阻塞**: lifespan 中 45s 首次爬取等待已删除。**公告编辑修复**: 公告卡片独立保存按钮。 |
 
-详见: `版本总历史.md`、`系统工作流程\系统工作流程.md`
-
-## 已知问题与解决方案
-
-### 1. APKPure Cloudflare 风控（IP 被封）
-
-**v3.5 已修复**: `apkpure.com` 被 Cloudflare interactive Turnstile 拦截，已切换主域名为 `apkpure.net`（Fetcher 可直接访问）。同时添加 CF 求解递归限制（_MAX_CF_SOLVE_ATTEMPTS=2），防止无限循环。
-
-**现象**: 日志出现 `CF solve aborted after 2 attempts` → apkpure.net 正常抓取。若 `.net` 也被封，日志出现 `StealthySession timeout after 75s`、`turnstile version discovered is "interactive"`。
-
-**原因**: Cloudflare 检测到高频爬取行为，对 IP 触发交互式 Turnstile 验证（需要真人点击），自动化工具无法绕过。
-
-**临时方案（若 .net 也被封）**:
-- 等待数小时，CF 封禁通常自动解除
-- 更换代理出口 IP（切换代理节点）
-- 在 `config.json` 中暂时移除 `apkpure`：`"enabled_sites": ["google_play", "apkcombo", "apkvision"]`
-- 调大更新间隔：`"update_check_interval": 7200`（2 小时）
-
-**长期方案**: 使用代理池轮换 IP，或对接住宅代理服务。
-
-### 2. 代理配置修改不生效
-
-**现象**: Settings 面板修改代理地址后保存，实际请求不使用新代理。
-
-**原因**: v3.1 前端发送了 `download_path` 等非白名单字段，后端 422 拒绝整个请求。v3.2 已修复——白名单移除敏感字段，非白名单键静默跳过。同时代理已加入白名单支持热更新。
-
-### 3. EXE 重启后数据丢失
-
-**现象**: v3.1 及之前版本，关闭 EXE 再打开，实时更新面板数据全部消失需重新爬取。
-
-**解决**: v3.2 已修复——`launcher.py` 工作目录改为 EXE 所在目录，数据持久化到 `data/crawler.db`。
-
-### 4. 服务器内存不足
-
-**现象**: 2GB 内存云服务器运行 EXE 出现内存不足。
-
-**原因**: Windows Server (~1.5GB) + Chromium headless × 2 (~600MB) + Python (~300MB) > 2GB。
-
-**解决**: 修改 `config.json`：`"playwright_concurrency": 0` 禁用浏览器，`"enabled_sites"` 移除 `apkmirror`。推荐配置 4GB+ 内存跑全套。
+详见: `版本总历史.md`、`系统工作流程\系统工作流程.md
 
 ## 技术栈
 

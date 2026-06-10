@@ -683,65 +683,91 @@ async def daily_updates(
     return JSONResponse(content=result, headers=headers)
 
 
-# ── 刷新状态 (v3.5: fire-and-forget 避免前端超时等待) ──
-_refresh_running: bool = False
+# ── 刷新状态 (v3.5: fire-and-forget / v3.6: per-source 锁定) ──
+_refreshing_sources: set[str] = set()
 _refresh_lock = asyncio.Lock()
+_ALL_SOURCES = {"apkpure", "apkcombo", "apkcombo_trending", "apkvision_updated", "apkvision_new"}
 
 
 @router.post("/daily-updates/refresh")
-async def trigger_daily_refresh():
-    """v3.5 fire-and-forget: 立即返回, 后台全量刷新."""
-    global _refresh_running
+async def trigger_daily_refresh(body: dict[str, Any] | None = None):
+    """v3.6 fire-and-forget: 立即返回, 后台全量刷新.
+
+    可选 body: {"sources": ["apkpure", "apkcombo"]} — 仅刷新指定源
+    """
+    global _refreshing_sources
     from backend.cron.update_tracker import update_once
 
+    sources = _parse_sources(body)
+    target_set = set(sources)
+
     async with _refresh_lock:
-        if _refresh_running:
-            return {"status": "busy", "message": "刷新已在后台运行中，请稍后再试"}
-        _refresh_running = True
+        conflict = target_set & _refreshing_sources
+        if conflict:
+            return {"status": "busy", "sources": list(conflict), "message": "部分源正在刷新中，请稍后再试"}
+        _refreshing_sources |= target_set
 
     async def _run():
-        global _refresh_running
+        global _refreshing_sources
         try:
-            await update_once(full_refresh=True)
-            logger.info("全量刷新完成 (后台)")
+            await update_once(full_refresh=True, sources=sources)
+            logger.info("全量刷新完成: {}", sources)
         except Exception as e:
             logger.error("全量刷新失败: {}", e)
         finally:
-            _refresh_running = False
+            async with _refresh_lock:
+                _refreshing_sources -= target_set
 
     asyncio.create_task(_run())
-    return {"status": "started", "message": "全量刷新已启动，后台执行中（约 60s）"}
+    return {"status": "started", "sources": sources, "message": f"全量刷新已启动 ({len(sources)} 个源)，后台执行中"}
 
 
 @router.post("/daily-updates/refresh-incremental")
-async def trigger_incremental_refresh():
-    """v3.5 fire-and-forget: 立即返回, 后台增量刷新."""
-    global _refresh_running
+async def trigger_incremental_refresh(body: dict[str, Any] | None = None):
+    """v3.6 fire-and-forget: 立即返回, 后台增量刷新.
+
+    可选 body: {"sources": ["apkpure", "apkcombo"]} — 仅刷新指定源
+    """
+    global _refreshing_sources
     from backend.cron.update_tracker import update_once
 
+    sources = _parse_sources(body)
+    target_set = set(sources)
+
     async with _refresh_lock:
-        if _refresh_running:
-            return {"status": "busy", "message": "刷新已在后台运行中，请稍后再试"}
-        _refresh_running = True
+        conflict = target_set & _refreshing_sources
+        if conflict:
+            return {"status": "busy", "sources": list(conflict), "message": "部分源正在刷新中，请稍后再试"}
+        _refreshing_sources |= target_set
 
     async def _run():
-        global _refresh_running
+        global _refreshing_sources
         try:
-            await update_once(full_refresh=False)
-            logger.info("增量刷新完成 (后台)")
+            await update_once(full_refresh=False, sources=sources)
+            logger.info("增量刷新完成: {}", sources)
         except Exception as e:
             logger.error("增量刷新失败: {}", e)
         finally:
-            _refresh_running = False
+            async with _refresh_lock:
+                _refreshing_sources -= target_set
 
     asyncio.create_task(_run())
-    return {"status": "started", "message": "增量刷新已启动，后台执行中（约 60s）"}
+    return {"status": "started", "sources": sources, "message": f"增量刷新已启动 ({len(sources)} 个源)，后台执行中"}
 
 
 @router.get("/daily-updates/refresh-status")
 async def refresh_status():
     """查询刷新任务是否正在运行."""
-    return {"running": _refresh_running}
+    return {"running": len(_refreshing_sources) > 0, "sources": list(_refreshing_sources)}
+
+
+def _parse_sources(body: dict[str, Any] | None) -> list[str]:
+    """从请求体中解析 sources 参数, 未提供则返回全部源."""
+    if body and isinstance(body.get("sources"), list):
+        sources = [s for s in body["sources"] if s in _ALL_SOURCES]
+        if sources:
+            return sources
+    return list(_ALL_SOURCES)
 
 
 @router.post("/apkpure/unblock")
