@@ -89,6 +89,42 @@ def _parse_cn_date(text: str) -> str | None:
     return None
 
 
+def _parse_iso_date(text: str) -> str | None:
+    """解析 ISO/英文日期格式: 2026-06-08, Jun 8, 2026, June 8 2026 等."""
+    import re as _re
+    # 1. ISO: 2026-06-08 或 2026/06/08
+    m = _re.search(r'(\d{4})[-/](\d{1,2})[-/](\d{1,2})', text)
+    if m:
+        try:
+            return datetime(int(m.group(1)), int(m.group(2)), int(m.group(3))).strftime("%Y-%m-%d")
+        except ValueError:
+            pass
+    # 2. 英文月份: Jun 8, 2026 / June 8 2026 / 8 Jun 2026
+    _MONTHS = {
+        "jan":1,"feb":2,"mar":3,"apr":4,"may":5,"jun":6,
+        "jul":7,"aug":8,"sep":9,"oct":10,"nov":11,"dec":12,
+    }
+    m = _re.search(
+        r'(\d{1,2})\s+(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*[\s,]+(\d{4})',
+        text, _re.IGNORECASE,
+    )
+    if m:
+        try:
+            return datetime(int(m.group(3)), _MONTHS[m.group(2).lower()[:3]], int(m.group(1))).strftime("%Y-%m-%d")
+        except ValueError:
+            pass
+    m = _re.search(
+        r'(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*[\s.]+(\d{1,2})[\s,]+(\d{4})',
+        text, _re.IGNORECASE,
+    )
+    if m:
+        try:
+            return datetime(int(m.group(3)), _MONTHS[m.group(1).lower()[:3]], int(m.group(2))).strftime("%Y-%m-%d")
+        except ValueError:
+            pass
+    return None
+
+
 async def _fetch_page(url: str, retries: int = 2) -> tuple[int, str]:
     """抓取页面: Fetcher 优先, 仅非 CF 失败时才降级 stealth_get.
 
@@ -306,10 +342,11 @@ async def _fetch_detail_time_apkpure(item: dict) -> dict:
 async def _fetch_detail_time_apkcombo(item: dict) -> dict:
     """访问 APKCombo 详情页获取真实更新时间.
 
-    v3.5: 增加 CF 检测, 防止 stealth 无限循环.
+    v3.7: 增强日期选择器 (多备选 + 多格式解析), 细化失败日志.
     """
     async with _DETAIL_SEMAPHORE:
         detail_url = item.get("detail_url", "")
+        pkg = item.get("package_name", "?")
         if not detail_url:
             return item
         try:
@@ -318,21 +355,36 @@ async def _fetch_detail_time_apkcombo(item: dict) -> dict:
                 logger.debug("APKCombo detail CF blocked: {}", detail_url[:60])
                 return item
             if status != 200 or len(html) < 1000:
-                logger.debug("APKCombo detail page failed: {} HTTP {}", detail_url[:60], status)
+                logger.debug("APKCombo detail http={} len={} for {}", status, len(html), pkg)
                 return item
             soup = BeautifulSoup(html, "html.parser")
-            ver_el = soup.select_one(".ver-item")
-            if ver_el:
-                date_text = ver_el.get_text(strip=True)
+
+            # v3.7: 多选择器兜底 — APKCombo 历史改版多次, .ver-item 可能失效
+            date_text = ""
+            for sel in (".ver-item", "[class*='update']", "[class*='date']", "[class*='time']", "time", ".app-meta span"):
+                el = soup.select_one(sel)
+                if el:
+                    date_text = el.get_text(strip=True)
+                    if date_text and len(date_text) >= 8:
+                        break
+
+            if date_text:
                 parsed = _parse_cn_date(date_text)
                 if parsed:
                     item["updated_at"] = parsed
                     return item
-            logger.debug("APKCombo detail page: .ver-item not found for {}", item.get("package_name"))
+                # v3.7: 中文格式失败 → 尝试 ISO/英文格式
+                parsed = _parse_iso_date(date_text)
+                if parsed:
+                    item["updated_at"] = parsed
+                    return item
+                logger.debug("APKCombo date parse failed: '{}' for {}", date_text[:60], pkg)
+            else:
+                logger.debug("APKCombo no date element found for {}", pkg)
         except asyncio.TimeoutError:
-            logger.debug("APKCombo detail page timeout: {}", detail_url[:60])
+            logger.debug("APKCombo detail timeout: {}", pkg)
         except Exception as exc:
-            logger.debug("APKCombo detail page error: {} — {}", detail_url[:60], exc)
+            logger.debug("APKCombo detail error: {} — {}", detail_url[:60], exc)
     return item
 
 

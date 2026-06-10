@@ -1,175 +1,88 @@
-实时游戏面板手动切换数据源功能设计文档
-一、需求概述
-在现有的实时游戏面板（DailyUpdates）中，增加手动选择数据源的功能，允许用户仅刷新自己关心的源，避免每次都全量爬取所有源（APKPure、APKCombo、APKCombo Trending、APKVision Updated、APKVision New），从而减少不必要的网络请求和服务器负载，提升刷新效率。
+游戏包名爬虫系统 v3.7 — 低配置电脑内存优化方案（不削弱功能）
+一、核心原则
+零功能降级：所有爬虫源（APKPure、APKCombo、APKMirror、APKVision、Google Play）依然全量启用，浏览器必须运行，所有超时、重试参数不变。
 
-典型使用场景：
+仅优化资源利用：通过复用、惰性加载、及时释放、减少冗余缓存来降低内存峰值，而不是禁用功能。
 
-只想查看 APKVision 新游戏 → 仅选择 apkvision_new，其他源不刷新（保留上次数据）。
+可配置但默认不削弱：提供可选的低内存模式开关（默认关闭），由用户自主决定是否启用（启用后不会跳过任何站点，仅调整并发与缓存策略）。
 
-只想同时查看 APKPure 和 APKCombo 热门 → 选择 apkpure 和 apkcombo，不刷新其他。
+二、内存占用主要来源（无法避免但可优化）
+组件	占用	优化思路
+Playwright 浏览器进程	150-250 MB	保持常驻，但降低页面并发数（playwright_concurrency=1 仍能支持所有站点，只是串行处理慢速源，不丢失功能）
+爬虫并发请求	每个请求 10-30 MB	降低 scraper_concurrency 到 3（不影响数据完整性，只是速度变慢）
+内存缓存（TTL）	30-50 MB	关闭内存缓存，直接读 SQLite（增加毫秒级延迟，可接受）
+前端 Vue 组件	80-150 MB	懒加载非首屏组件，释放内存
+日志输出	CPU/I/O	异步+减少控制台输出
+三、具体优化措施（不削弱功能）
+3.1 降低 Playwright 页面并发数（保留浏览器）
+修改：将 playwright_concurrency 默认值从 2 改为 1（低配模式）。
 
-二、可行性分析
-✅ 完全可行，且对现有功能无负面影响。
+慢速源（APKMirror、APKVision）将串行处理，速度变慢，但完全可用。
 
-当前后端刷新接口已支持 fire-and-forget 模式，可扩展接受参数 sources。
+浏览器进程仍常驻，内存仍占用，但并发页面减少可降低额外内存。
 
-数据库存储按源隔离（source 字段），可以独立更新单个源的数据而不影响其他源。
+配置："playwright_concurrency": 1（用户可自行改回 2）
 
-前端已有丰富的 UI 组件（多选框、复选框组），易于集成。
+3.2 降低整体爬虫并发（不丢数据）
+修改：低配模式下建议 scraper_concurrency=3（原 6）。快速源（GP、APKPure、APKCombo）将串行，总耗时增加，但每个请求仍会成功。
 
-三、设计方案
-3.1 后端修改
-3.1.1 修改刷新 API 接受源参数
-当前端点：
+3.3 关闭内存缓存（改用 SQLite）
+新增配置：enable_memory_cache（默认 true），低配模式设为 false。
 
-POST /api/daily-updates/refresh （全量刷新）
+每次查询直接读取 SQLite，不再缓存到内存。增加几毫秒延迟，但释放 30-50 MB 内存。
 
-POST /api/daily-updates/refresh-incremental （增量刷新）
+3.4 降低实时面板前端轮询频率
+修改：低配模式下 frontend_poll_interval=600（10 分钟），仍能更新数据，但减少网络和渲染开销。
 
-修改后：
+3.5 前端组件懒加载
+实现：在 App.vue 中将非首屏组件（BatchPanel, DownloadQueue, SettingsPanel, DailyUpdates）改为异步加载。首屏只加载 PackageInput 和 ResultTable。
 
-两个端点均增加可选 JSON 参数 sources，类型为字符串数组，例如 ["apkpure", "apkcombo"]。
+用户切换到对应选项卡时才加载组件，降低初始内存。
 
-若未提供 sources 或数组为空，则保持原有行为（刷新所有已配置的源）。
+3.6 日志优化
+低配模式自动将 log_level 设为 WARNING，并禁用控制台输出（仅写文件）。减少 CPU 和 I/O 压力。
 
-若提供了 sources，则仅刷新指定的源，其他源的数据在数据库中保持不变。
+3.7 浏览器启动参数优化（不减少能力）
+在 browser_manager.py 中增加 Chromium 启动参数，降低内存开销：
 
-实现要点：
+python
+launch_args = [
+    "--disable-dev-shm-usage",   # 减少共享内存使用
+    "--no-sandbox",
+    "--disable-gpu",
+    "--disable-software-rasterizer",
+    "--disable-extensions",
+    "--disable-background-timer-throttling",
+    "--disable-backgrounding-occluded-windows",
+    "--disable-renderer-backgrounding"
+]
+这些参数不影响功能，仅降低资源占用。
 
-在 update_tracker.py 中新增函数 refresh_sources(source_list, incremental=False)。
-
-该函数根据 incremental 标志调用原有的抓取逻辑，但只执行列表中源对应的抓取函数。
-
-对未选中的源，不调用任何抓取函数，也不删除其已有数据。
-
-示例请求：
+四、低配模式一键切换（不损失功能）
+提供 config_low_mem.json 模板，用户复制替换即可：
 
 json
-POST /api/daily-updates/refresh
-Content-Type: application/json
-
 {
-  "sources": ["apkpure", "apkcombo"]
+  "scraper_concurrency": 3,
+  "playwright_concurrency": 1,
+  "batch_concurrency": 2,
+  "download_concurrency": 2,
+  "enable_memory_cache": false,
+  "frontend_poll_interval": 600,
+  "log_level": "WARNING",
+  "enable_console_log": false
 }
-3.1.2 独立抓取函数支持
-当前 update_tracker.py 中已有按源的独立抓取函数：
+并且保留所有站点的启用，不删除任何源。
 
-fetch_apkpure()
+五、自动检测（可选）
+在 launcher.py 中加入内存检测，若总内存 < 4GB，弹窗询问是否自动应用低配模式，用户确认后才修改，绝不强制。
 
-fetch_apkcombo()
+六、效果预估
+内存峰值：从 1.2GB 降至 800-900 MB，低配电脑可运行。
 
-fetch_apkcombo_trending()
+功能完整性：100% 保持，所有站点依然爬取，只是速度变慢。
 
-fetch_apkvision_updated()
+用户体验：启动后首屏更快，面板轮询间隔更长，但数据依然更新。
 
-fetch_apkvision_new()
-
-这些函数均独立调用并写入数据库。refresh_sources 只需按需调用并处理异常。
-
-3.1.3 状态反馈（可选）
-由于采用 fire-and-forget 模式，刷新立即返回。可增加 GET /api/daily-updates/refresh-status 接口，返回每个源的最近刷新状态（成功/失败/正在刷新），供前端显示进度。但不是必须，可后续优化。
-
-3.2 前端修改
-3.2.1 新增数据源选择器
-在 DailyUpdates.vue 组件的工具栏（现有“手动刷新”按钮旁边）增加一个下拉多选框或按钮组，用于选择要刷新的源。
-
-组件建议：使用 el-dropdown + el-checkbox-group，或使用 el-popover 内含复选框。
-
-示例 UI：
-
-text
-[ 选择数据源 ▼ ]  [ 全量刷新 ]  [ 增量刷新 ]
-点击“选择数据源”弹出面板，列出所有源（带复选框）：
-
-☑ APKPure 热门
-
-☑ APKCombo 热门
-
-☑ APKCombo 最新更新
-
-☑ APKVision 最近更新
-
-☑ APKVision 新游戏
-
-用户勾选后，关闭面板。后续点击“全量刷新”或“增量刷新”时，仅刷新勾选的源。
-
-3.2.2 刷新逻辑修改
-当用户点击“全量刷新”或“增量刷新”时，前端收集当前勾选的源列表。
-
-若列表非空，调用对应的 API（/api/daily-updates/refresh 或 /refresh-incremental），并在请求体中附带 sources 数组。
-
-若列表为空（未勾选任何源），提示用户至少选择一个源，或默认全选。
-
-提供“全选”快捷按钮，一键选择所有源，恢复原有行为。
-
-3.2.3 用户提示
-刷新过程中，由于是 fire-and-forget，前端可显示全局 loading 或 toast 提示“正在刷新所选源，请稍后查看”。
-
-若部分源刷新失败，可通过轮询状态接口（如实现）或依赖后续自动定时刷新恢复。
-
-3.3 数据库与数据一致性
-不同源的数据存储在同一张 daily_updates 表中，通过 source 字段区分。
-
-刷新选中源时，执行 DELETE FROM daily_updates WHERE source = ? 然后插入新数据（或使用 INSERT OR REPLACE）。不影响未选中源的数据。
-
-前端展示时，各标签页直接从数据库读取对应源的数据，因此未刷新的源仍显示上次抓取的内容，符合预期。
-
-3.4 性能与资源影响
-用户主动选择少量源刷新时，爬虫负载显著降低，对低配电脑尤其友好。
-
-支持用户按需刷新，避免了不必要的全量抓取，总体资源消耗减少。
-
-不影响原有的定时自动增量刷新（仍按配置 update_check_interval 全量或增量执行）。定时任务可沿用原有逻辑，或也支持按配置的源列表执行（可后续扩展）。
-
-四、注意事项
-定时任务与手动刷新的关系：
-定时任务（每30分钟）仍保持原有行为（刷新全部源或增量全源），以保证数据及时性。用户手动刷新只是补充，不影响自动任务。
-
-源名称一致：
-前端传递给后端的源名称必须与后端抓取函数标识完全一致。建议定义常量：
-
-apkpure
-
-apkcombo
-
-apkcombo_trending
-
-apkvision_updated
-
-apkvision_new
-
-错误处理：
-若用户选择的某个源刷新失败（如站点被封），其他源仍应继续刷新，失败信息记录日志，前端不阻塞。
-
-首次加载面板：
-v3.6 启动后面板为空，用户需手动刷新。此时若未选择任何源，应提示用户先选择源，或默认全选。
-
-UI 兼容性：
-所有修改仅影响实时更新面板的刷新行为，不影响排查、下载等核心功能。
-
-五、实施步骤（供开发参考）
-后端：
-
-修改 routes.py 中 /api/daily-updates/refresh 和 /refresh-incremental 接口，解析 sources 参数。
-
-在 update_tracker.py 中实现 refresh_sources(sources, incremental)，调用对应的抓取函数。
-
-确保异常隔离，单个源失败不影响其他源。
-
-前端：
-
-在 DailyUpdates.vue 中添加数据源选择组件（复选框组）。
-
-修改 refresh() 和 refreshIncremental() 方法，读取选中源列表，发送请求。
-
-增加“全选”按钮及交互提示。
-
-测试：
-
-选择单个源刷新 → 仅该源表格数据更新，其他源不变。
-
-选择多个源刷新 → 对应源更新。
-
-不选择任何源 → 提示用户或默认全选。
-
-全量刷新（原行为）→ 所有源更新。
+七、总结
+本方案从不禁用浏览器，也从不删除任何站点，仅通过降低并发、关闭内存缓存、前端懒加载、优化启动参数等手段，在不丢失任何功能的前提下，让低配电脑也能运行。用户可以根据自己的硬件条件选择是否启用低配模式，默认保持原有高并发高缓存配置。

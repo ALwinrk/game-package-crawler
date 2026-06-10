@@ -484,8 +484,9 @@ onUnmounted(() => {
 .source-selector { display: flex; flex-direction: column; gap: 4px; }
 .source-actions { display: flex; gap: 8px; margin-bottom: 4px; }
 .source-checkbox { margin: 4px 0; }
-.panel-title { font-weight: 700; font-size: 16px; }
-.fetched-time { font-size: 12px; color: var(--text-muted); font-style: italic; }
+.panel-title { font-weight: 700; font-size: 17px; }
+.fetched-time { font-size: 13px; color: var(--text-muted); font-style: italic; }
+.header-actions .el-button { font-size: 13px; }
 
 .table-grid { display: flex; gap: 10px; overflow-x: auto; width: 100%; }
 .grid-table { flex: 1; min-width: 0; font-size: 13px; }
