@@ -176,9 +176,10 @@ async def _do_fetch(data: dict[str, Any], query_fn) -> dict:
 
     expected_version = data.get("expected_version")
     expected_version_code = data.get("expected_version_code")
+    force = data.get("force", False)
     save_memo = data.get("save_memo", False)
 
-    result = await query_fn(package, expected_version, expected_version_code)
+    result = await query_fn(package, expected_version, expected_version_code, force=force)
 
     if save_memo and result.best_version:
         memo = get_memo_store()

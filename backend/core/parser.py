@@ -29,24 +29,36 @@ def extract_version(html: str) -> str | None:
     3. itemprop="version"
     4. 全文 "Version: x.y.z" 模式
     5. 全文 `>x.y.z<` 模式（兜底）
+
+    v3.8: 过滤推广元素（aegon/store/promo/ad/buff），避免误取推广 App 的版本号。
     """
     soup = BeautifulSoup(html, "html.parser")
 
-    # 策略 1：class 名含 version
+    def _is_promo(elem) -> bool:
+        classes = ' '.join(elem.get('class', []))
+        return any(kw in classes.lower() for kw in ('aegon', 'store', 'promo', 'ad', 'buff'))
+
+    # 策略 1：class 名含 version（跳过推广元素）
     for elem in soup.select('[class*="version"]'):
+        if _is_promo(elem):
+            continue
         text = elem.get_text(strip=True)
         if _is_version(text):
             return text
 
-    # 策略 2：data-* 属性
+    # 策略 2：data-* 属性（跳过推广元素）
     for attr in _ATTR_CANDIDATES:
         for elem in soup.find_all(attrs={attr: True}):
+            if _is_promo(elem):
+                continue
             v = elem[attr].strip()
             if re.match(r'^\d+\.\d+', v) and len(v) < 25:
                 return v
 
-    # 策略 3：Schema.org itemprop
+    # 策略 3：Schema.org itemprop（跳过推广元素）
     for elem in soup.select('[itemprop="version"]'):
+        if _is_promo(elem):
+            continue
         m = re.search(r'([\d]+\.[\d]+(?:\.[\d]+)?)', elem.get_text(strip=True))
         if m:
             return m.group(1)
@@ -70,27 +82,47 @@ def extract_version(html: str) -> str | None:
 
 
 def extract_version_code(html: str, package: str = "") -> str | None:
-    """从 HTML 中提取 version code（3-12 位数字）.
+    """从 HTML 中提取 version code（1-12 位数字）.
 
-    按特异性从高到低依次尝试 13 个模式，首个命中即返回。
+    v3.8: 优先使用 BeautifulSoup 从非推广元素提取，避免误匹配 APKPure 推广 App。
+    按特异性从高到低依次尝试，首个命中即返回。
     """
-    # 模式 0a：data-dt-version_code="NNNNNN"（APKPure 详情页，带下划线）
-    # 关键：页面含推荐 APP，必须限制匹配范围在同一元素内（最多 500 字符）
-    if package:
-        block_pat = re.compile(
-            r'data-dt-package_name\s*=\s*"' + re.escape(package) + r'".{0,500}?'
-            r'data-dt-version_code\s*=\s*["\']?(\d{1,12})',
-            re.DOTALL | re.IGNORECASE,
-        )
-        m = block_pat.search(html)
-        if m:
-            return m.group(1)
-    else:
-        m = re.search(r'data-dt-version_code\s*=\s*["\']?(\d{1,12})', html, re.IGNORECASE)
-        if m:
-            return m.group(1)
+    soup = BeautifulSoup(html, "html.parser")
 
-    # 模式 0b：data-version_code="NNNNNN"（带下划线变体）
+    def _is_promo(elem) -> bool:
+        """检查元素是否属于推广/推荐/广告内容."""
+        classes = ' '.join(elem.get('class', []))
+        return any(kw in classes.lower() for kw in ('aegon', 'store', 'promo', 'ad', 'buff'))
+
+    # ═══ v3.8: BS4 结构化提取（过滤推广元素） ═══
+
+    # 模式 0a：data-dt-version-code（连字符）— APKPure 详情页主格式，version-item 元素
+    for item in soup.select('[data-dt-version-code]'):
+        if _is_promo(item):
+            continue
+        vc = item.get('data-dt-version-code', '').strip()
+        if vc and vc.isdigit() and 1 <= len(vc) <= 12:
+            return vc
+
+    # 模式 0b：data-dt-version_code（下划线）— 旧版格式，过滤 aegon-card 等推广
+    for item in soup.select('[data-dt-version_code]'):
+        if _is_promo(item):
+            continue
+        vc = item.get('data-dt-version_code', '').strip()
+        if vc and vc.isdigit() and 1 <= len(vc) <= 12:
+            return vc
+
+    # 模式 0c：data-dt-versioncode（无分隔符）— 搜索页/旧版格式，过滤推广
+    for item in soup.select('[data-dt-versioncode]'):
+        if _is_promo(item):
+            continue
+        vc = item.get('data-dt-versioncode', '').strip()
+        if vc and vc.isdigit() and 3 <= len(vc) <= 12:
+            return vc
+
+    # ═══ 以下为全局兜底模式（原有逻辑，用于非 APKPure 页面） ═══
+
+    # 模式 0d：data-version_code（无 dt- 前缀）
     m = re.search(r'data-version_code\s*=\s*["\']?(\d{3,12})', html, re.IGNORECASE)
     if m:
         return m.group(1)
@@ -113,12 +145,6 @@ def extract_version_code(html: str, package: str = "") -> str | None:
     clean = re.sub(r'<[^>]+>', ' ', html)
     for m in re.finditer(r'(\d+\.\d+\.\d+)\s*[\(（]\s*(\d{3,12})\s*[\)）]', clean):
         return m.group(2)
-
-    # 模式 3a：data-dt-versioncode="NNNNNN"（APKPure 搜索页，注意这是连写无下划线）
-    # 优先级低于 0a/0b，因为详情页此属性可能属于推荐列表的其他 APP
-    m = re.search(r'data-dt-versioncode\s*=\s*["\']?(\d{3,12})', html, re.IGNORECASE)
-    if m:
-        return m.group(1)
 
     # 模式 3b：data-versioncode="NNNNNN"
     m = re.search(r'data-versioncode\s*=\s*["\']?(\d{3,12})', html, re.IGNORECASE)
@@ -161,11 +187,19 @@ def extract_version_code(html: str, package: str = "") -> str | None:
     if m:
         return m.group(1)
 
-    # 模式 10：兜底 — version/ver/vc/code 关键词后的 :或= 后接大数字
-    m = re.search(
-        r'(?:version|ver|vc|code)\s*[：:=]\s*(\d{4,12})\b',
-        html, re.IGNORECASE,
-    )
+    # 模式 10：兜底 — version/ver/vc/code 关键词后的 :或= 后接数字
+    # v3.8: 在非推广元素的属性中搜索，避免匹配 aegon-card 等推广 App
+    _pat10 = re.compile(r'(?:version|ver|vc|code)\s*[：:=]\s*(\d{3,12})\b', re.IGNORECASE)
+    for elem in soup.find_all():
+        if _is_promo(elem):
+            continue
+        for val in elem.attrs.values():
+            if isinstance(val, str):
+                m = _pat10.search(val)
+                if m:
+                    return m.group(1)
+    # 全局兜底：全文搜索（非 APKPure 页面可能没有 class 标记）
+    m = _pat10.search(html)
     if m:
         return m.group(1)
 

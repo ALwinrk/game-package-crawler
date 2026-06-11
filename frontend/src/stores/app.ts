@@ -136,8 +136,18 @@ export const useAppStore = defineStore('app', () => {
   // ── 计算 ──
   const latestResult = computed(() => results.value[0] || null)
 
+  // ── 请求取消 (v3.8: 防止竞态条件导致结果串数据) ──
+  let abortController: AbortController | null = null
+
   // ── API 调用 ──
   async function doFetch(packageName: string) {
+    // 取消上一个未完成的请求，防止旧响应覆盖新结果
+    if (abortController) {
+      abortController.abort()
+    }
+    abortController = new AbortController()
+    const signal = abortController.signal
+
     loading.value = true
     results.value = []
     try {
@@ -151,11 +161,13 @@ export const useAppStore = defineStore('app', () => {
           expected_version_code: expectedVersionCode.value || null,
           save_memo: true,
         }),
+        signal,
       })
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
       const data = await resp.json()
       results.value = [data as FetchResult]
     } catch (e: any) {
+      if (e.name === 'AbortError') return  // 被取消的请求静默忽略
       results.value = [{
         package: packageName,
         name: '',
@@ -176,6 +188,13 @@ export const useAppStore = defineStore('app', () => {
 
   // 批量查询多个包名
   async function doFetchBatch(packageNames: string[]) {
+    // 取消上一个未完成的请求，防止旧响应覆盖新结果
+    if (abortController) {
+      abortController.abort()
+    }
+    abortController = new AbortController()
+    const signal = abortController.signal
+
     loading.value = true
     results.value = []
     try {
@@ -190,11 +209,13 @@ export const useAppStore = defineStore('app', () => {
           })),
           mode: 'fast',
         }),
+        signal,
       })
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
       const data = await resp.json()
       results.value = (data.results || []) as FetchResult[]
     } catch (e: any) {
+      if (e.name === 'AbortError') return  // 被取消的请求静默忽略
       console.error('[batchFetch]', e)
       results.value = []
     } finally {

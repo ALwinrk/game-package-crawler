@@ -129,6 +129,10 @@ def _build_fetch_result(
     codes: list[str] = []
 
     for info in results.values():
+        # v3.8: 防御性检查 — 跳过爬虫返回的错误包名数据
+        if info.package and info.package != package:
+            logger.warning("爬虫 {} 返回了错误包名: {} ≠ {}，已跳过", info.source, info.package, package)
+            continue
         if info.version and not info.error and is_plausible_version(info.version):
             versions.append(info.version)
         elif info.version and not info.error:
@@ -234,14 +238,16 @@ async def query_fast(
     package: str,
     expected_version: str | None = None,
     expected_version_code: str | None = None,
+    force: bool = False,
 ) -> FetchResult:
     """快速排查 — Google Play + APKPure + APKCombo（秒级响应）."""
     from backend.core.cache import get_scraper_cache
 
     cache = get_scraper_cache()
-    cached = await cache.get(package, "fast")
-    if cached is not None:
-        return cached
+    if not force:
+        cached = await cache.get(package, "fast")
+        if cached is not None:
+            return cached
 
     scrapers = _get_scrapers(FAST_SCRAPERS)
     if not scrapers:
@@ -260,14 +266,16 @@ async def query_slow(
     package: str,
     expected_version: str | None = None,
     expected_version_code: str | None = None,
+    force: bool = False,
 ) -> FetchResult:
     """慢速排查 — APKMirror + APKVision（浏览器渲染，需 30-90s）."""
     from backend.core.cache import get_scraper_cache
 
     cache = get_scraper_cache()
-    cached = await cache.get(package, "slow")
-    if cached is not None:
-        return cached
+    if not force:
+        cached = await cache.get(package, "slow")
+        if cached is not None:
+            return cached
 
     scrapers = _get_scrapers(SLOW_SCRAPERS)
     if not scrapers:
@@ -286,14 +294,16 @@ async def query_single(
     package: str,
     expected_version: str | None = None,
     expected_version_code: str | None = None,
+    force: bool = False,
 ) -> FetchResult:
     """全量排查 — 所有启用的站点（快速 + 慢速）."""
     from backend.core.cache import get_scraper_cache
 
     cache = get_scraper_cache()
-    cached = await cache.get(package, "all")
-    if cached is not None:
-        return cached
+    if not force:
+        cached = await cache.get(package, "all")
+        if cached is not None:
+            return cached
 
     scrapers = _get_scrapers(ALL_SCRAPERS)
     if not scrapers:

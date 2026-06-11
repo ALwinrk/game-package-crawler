@@ -1,4 +1,4 @@
-# 游戏包名爬虫系统 v3.7
+# 游戏包名爬虫系统 v3.8
 
 Android APK 版本排查工具 — FastAPI + Vue 3 前后端分离架构。支持 6 大站点/数据源并发查询、实时更新游戏面板（APKPure/APKCombo/APKVision）、版本对比、内置异步下载（断点续传+重试+架构识别）、Excel 批量处理、记忆化输入、动态系统公告。
 
@@ -313,22 +313,23 @@ build_exe.bat
 
 | 版本 | 主要变更 |
 |------|----------|
-| v2.1 | MVP: FastAPI + Vue3 基础架构, 5 站点爬虫 |
-| v2.2 | 记忆化输入、Excel 批量写回、下载队列 |
-| v2.3 | 设置面板、代理切换、站点开关 |
-| v2.4 | 批量并发 (Semaphore)、TTL 缓存、慢源异步、流式 Excel |
-| v2.5 | 深色/浅色主题、游戏中文名+更新内容卡片、Cloudflare 检测增强 |
-| v2.6 | BatchPanel 重构、DownloadQueue 独立组件 |
-| v2.7 | SettingsPanel 重做、配置热更新白名单 |
+| v3.8 | 修复 APKPure version_code 串数据（BS4 按元素语义提取 + 推广过滤）、前端竞态条件（AbortController）、force 缓存绕过、package 一致性校验 |
+| v3.7 | 数据源选择器、启动优化、增量提速、APKCombo 日期多格式解析、关键词黑名单扩展 |
+| v3.6 | APKPure 关键词过滤、whats_new 修复、全宽面板、动态公告 |
+| v3.5 | CF 防护增强、域名切换 apkpure.net、CF 感知熔断、面板独立展示上限、fire-and-forget 刷新 |
+| v3.4 | 增量更新（请求量 -83%）、入库去重、容量控制、双刷新模式、服务器部署适配 |
+| v3.3 | TLS 指纹轮换、Chromium 持久化、浏览器反检测、熔断增强、下载修复、三按钮操作 |
+| v3.2 | 启动优化、EXE 数据持久化、配置安全、APKPure 分类优化 + stealth 降级、右键复制包名 |
+| v3.1 | APKVision 实时面板、代理降级直连修复、配置热更新原子性、前端 resp.ok 检查 |
+| v3.0 | 实时更新游戏面板、下载重试+架构识别、三列分栏布局、速率限制、loguru 日志系统 |
 | v2.8 | 全局 CSS 主题变量、UI 一致性优化、启动器完善、中文详情页 |
-| v3.0 | 实时更新游戏面板（APKPure/APKCombo）、下载重试+HEAD预检+架构识别、APKCombo分类过滤、三列分栏布局、独立标签页、速率限制(slowapi)、日志系统(loguru) |
-| v3.1 | APKVision 实时更新面板、代理降级直连修复（空 dict vs None）、配置热更新原子性修复、前端 resp.ok 检查 |
-| v3.2 | **启动优化**: DB 缓存预热，有数据立即可用。**EXE 数据持久化**: 工作目录改为 EXE 所在目录。**配置安全**: 热更新白名单移除敏感字段 + 数值类型校验。**手动刷新**: 触发实际爬取并等待完成。**APKPure 优化**: 分类砍半 + stealth 降级 + 批次间暂停。**UI**: 右键复制包名、实时面板置顶。**前端**: 所有 fetch 增加 resp.ok 检查 + catch 块日志 |
-| v3.3 | **反封禁**: TLS 指纹轮换 (5 指纹池) + 分类随机顺序 + 间隔随机化 3-7s。**Chromium 持久化**: 复制到 EXE 目录防杀软拦截，启动零 EPIPE。**浏览器反检测**: AutomationControlled + 随机 viewport + stealth 脚本。**熔断增强**: API 手工重置 + 连续失败自动降频至 7200s。**下载修复**: APKCombo/APKPure URL 双语言码修复 + HTML 页面自动降级 Playwright + JS 触发带 Referer 下载。**UI**: 结果表格三按钮 (详情页/浏览器下载/点击下载) |
-| v3.4 | **增量更新**: Top-N 增量+提前终止算法, 定时更新请求量 -83%。**入库去重**: (source,package) 唯一索引 + INSERT OR REPLACE 合并。**容量控制**: 数据库 150/面板 90-90-60 分源可配。**双刷新模式**: 全量/增量按钮 + 刷新面板按钮。**首次全量**: full_refresh 标志跳过提前终止。**服务器部署**: ms-playwright Chromium 兜底。**EXE 稳定性**: 全局异常捕获 + 端口占用检查 + 版本号统一 v3.4 |
-| v3.5 | **CF 防护**: StealthySession 子类限制 CF 求解递归 (_MAX_CF_SOLVE_ATTEMPTS=2), 防止 interactive Turnstile 无限循环。**域名切换**: APKPure 主域名 apkpure.com → apkpure.net (Fetcher 可用)。**CF 感知熔断**: record_cf_failure 2× 权重加速降频/熔断。**面板调整**: 各源独立展示上限 (90/60/90/40/40)。**刷新改版**: fire-and-forget 模式，点击立即返回，后台执行 + 前端自动轮询，彻底解决超时等待。**超时优化**: stealth_timeout 45→30s |
-| v3.6 | **APKPure 关键词过滤**...启动行为: 不再自动全量刷新，需手动点击「全量刷新」触发爬取。 |
-| v3.7 | **数据源选择器**: 面板新增📡下拉多选框，按需选择刷新指定源，避免全量爬取；per-source 锁定允许不同源并行刷新。**启动优化**: launcher 端口等待(3s延迟+30s超时)消除 ERR_CONNECTION_REFUSED；前端弹性轮询(指数退避+60s超时)；浏览器初始化失败不再阻塞就绪；移除 lifespan 45s 空等待。**增量提速**: APKCombo 详情富化上限缩减(60→30, 90→40)，单次增量周期加速~50%。**APKCombo 日期修复**: `.ver-item` 选择器多备选兜底 + `_parse_iso_date` 支持 ISO/英文月份格式。**公告编辑修复**: 公告卡片独立保存按钮。**关键词黑名单扩展**: 新增棋牌/博彩/斗地主等中文关键词。 |
+| v2.7 | SettingsPanel 重做、配置热更新白名单 |
+| v2.6 | BatchPanel 重构、DownloadQueue 独立组件 |
+| v2.5 | 深色/浅色主题、游戏中文名+更新内容卡片、Cloudflare 检测增强 |
+| v2.4 | 批量并发、TTL 缓存、慢源异步、流式 Excel |
+| v2.3 | 设置面板、代理切换、站点开关 |
+| v2.2 | 记忆化输入、Excel 批量写回、下载队列 |
+| v2.1 | MVP: FastAPI + Vue3 基础架构、5 站点爬虫 |
 
 详见: `版本总历史.md`、`系统工作流程\系统工作流程.md
 

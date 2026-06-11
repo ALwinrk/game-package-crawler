@@ -1,5 +1,5 @@
 <template>
-  <div class="result-table" v-for="(result, idx) in store.results" :key="idx" :style="{ animationDelay: `${idx * 0.08}s` }">
+  <div class="result-table" v-for="(result, idx) in store.results" :key="result.package || idx" :style="{ animationDelay: `${idx * 0.08}s` }">
     <el-card shadow="never" class="result-card animate-fade-in-up">
       <!-- 摘要 -->
       <template #header>
